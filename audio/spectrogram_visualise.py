@@ -18,8 +18,8 @@ S_db1 = spectrogram(y, sr)
 
 peaks = find_peaks(S_db1)
 
-times = librosa.frames_to_time([t for t, f in peaks], sr=sr, hop_length=HOP_LENGTH)  # индексы -> секунды
-freqs = librosa.fft_frequencies(sr=sr, n_fft=N_FFT)[[f for t, f in peaks]]   # индексы -> Гц
+times = librosa.frames_to_time([t for t, f in peaks], sr=sr, hop_length=HOP_LENGTH)
+freqs = librosa.fft_frequencies(sr=sr, n_fft=N_FFT)[[f for t, f in peaks]]
 
 plt.figure()
 times_spec = np.arange(S_db1.shape[1]) * HOP_LENGTH / sr

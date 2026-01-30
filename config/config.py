@@ -8,3 +8,5 @@ PEAK_NEIGHBORHOOD_SIZE = 20
 AMP_MIN_DB = -40
 
 FAN_VALUE = 5  # сколько соседних пиков связывать
+
+MIN_MATCHES = 20
