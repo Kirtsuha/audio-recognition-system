@@ -8,6 +8,7 @@ def match(hashes, db, min_matches=20):
     votes = defaultdict(int)
 
     for h, t_query in hashes:
+        h = int(h)
         matches = db.query(Fingerprint).filter(Fingerprint.hash == h).all()
         for m in matches:
             delta = m.time_offset - t_query

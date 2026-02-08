@@ -27,7 +27,7 @@ def index_track_api(
 
     hashes = fingerprint_audio(path)
 
-    result = match(hashes, db)   # <-- ТЕПЕРЬ ПРАВИЛЬНО
+    result = match(hashes, db)
 
     if not result:
         return {"match": False}
