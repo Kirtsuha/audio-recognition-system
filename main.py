@@ -1,16 +1,16 @@
 
 
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, Depends
 import tempfile
 import shutil
 
+from sqlalchemy.orm import Session
+
 from fingerprint.matcher import match
+from repository.db import get_db
 from service.audio2fingerprint import fingerprint_audio
 
 app = FastAPI(title="Music Recognition service")
-
-fingerprint_db = {}
-track_meta = {}
 
 @app.get("/health")
 async def health():
@@ -18,31 +18,22 @@ async def health():
 
 @app.post("/index")
 def index_track_api(
-        track_id: int,
-        title: str,
-        artist: str,
-        file: UploadFile = File(...)
+        file: UploadFile = File(...),
+        db: Session = Depends(get_db)
 ):
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         shutil.copyfileobj(file.file, tmp)
         path = tmp.name
 
     hashes = fingerprint_audio(path)
-    result = match(hashes, fingerprint_db)
-    print(hashes, len(hashes), result)
+
+    result = match(hashes, db)   # <-- ТЕПЕРЬ ПРАВИЛЬНО
 
     if not result:
         return {"match": False}
 
-    track = track_meta[result["track_id"]]
-
     return {
         "match": True,
-        "track": track,
+        "track_id": result["track_id"],
         "confidence": min(1.0, result["matches"] / 100)
     }
-
-
-@app.get("/")
-def root():
-    return {"message": "Hello World"}

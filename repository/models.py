@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, Text, ForeignKey, BigInteger
 
-from repository.database import Base
+from database_config import Base
 
 
 class Track(Base):

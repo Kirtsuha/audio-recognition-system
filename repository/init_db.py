@@ -1,4 +1,4 @@
-from repository.database import engine
+from database_config import engine
 from repository.models import Base
 
 if __name__ == "__main__":
