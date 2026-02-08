@@ -1,23 +1,17 @@
 from collections import defaultdict
 
+from repository.models import Fingerprint
+
 
 def match(hashes, db, min_matches=20):
-    """
-    :param hashes: List[(hash, time_offset)]
-    :param db: dict[hash] -> List[(track_id, time_offset)]
-    :param min_matches:
-    :return:
-    """
 
     votes = defaultdict(int)
 
     for h, t_query in hashes:
-        if h not in db:
-            continue
-
-        for track_id, t_db in db[h]:
-            delta = t_db - t_query
-            votes[(track_id, delta)] += 1
+        matches = db.query(Fingerprint).filter(Fingerprint.hash == h).all()
+        for m in matches:
+            delta = m.time_offset - t_query
+            votes[(m.track_id, delta)] += 1
 
     if not votes:
         return None

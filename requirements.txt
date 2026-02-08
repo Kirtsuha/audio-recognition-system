@@ -4,3 +4,6 @@ librosa
 numpy
 scipy
 python-multipart
+sqlalchemy
+psycopg2-binary
+db

@@ -1,0 +1,17 @@
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: music-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: music_recognition
+      POSTGRES_USER: music_user
+      POSTGRES_PASSWORD: music_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
