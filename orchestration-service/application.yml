@@ -4,3 +4,18 @@ server:
 fingerprint:
   service:
     url: http://localhost:8000/index
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/musicdb
+    username: postgres
+    password: postgres
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+jwt:
+  secret: my-super-secret-key-my-super-secret-key
+  expiration: 3600000
