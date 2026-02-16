@@ -20,6 +20,13 @@ public class User {
 
     private String passwordHash;
 
+    @Column
+    private String role = "ROLE_USER";
+
+    public String getRole() {
+        return role;
+    }
+
     public Long getId() {
         return id;
     }

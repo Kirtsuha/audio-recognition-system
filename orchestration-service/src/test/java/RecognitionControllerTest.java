@@ -1,15 +1,11 @@
 import org.hse.musicrecognition.Main;
-import org.hse.musicrecognition.config.WebClientConfig;
-import org.hse.musicrecognition.controller.RecognitionController;
 import org.hse.musicrecognition.dto.FingerprintResponse;
 import org.hse.musicrecognition.service.FingerprintClient;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webflux.test.autoconfigure.WebFluxTest;
 import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
-import org.springframework.context.annotation.Import;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;

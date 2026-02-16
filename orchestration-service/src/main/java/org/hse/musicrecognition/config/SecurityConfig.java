@@ -2,6 +2,7 @@ package org.hse.musicrecognition.config;
 
 import lombok.RequiredArgsConstructor;
 import org.hse.musicrecognition.repository.UserRepository;
+import org.hse.musicrecognition.service.JwtFilter;
 import org.hse.musicrecognition.service.JwtService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
