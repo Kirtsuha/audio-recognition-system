@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Integer, Text, ForeignKey, BigInteger
+from sqlalchemy import Column, Integer, Text, ForeignKey, BigInteger, PrimaryKeyConstraint
 
-from database_config import Base
+from repository.database_config import Base
 
 
 class Track(Base):
@@ -16,3 +16,7 @@ class Fingerprint(Base):
     hash = Column(BigInteger, primary_key=True)
     track_id = Column(Integer, ForeignKey("track.id"), nullable=False)
     time_offset = Column(Integer, nullable=False)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("hash", "track_id", "time_offset"),
+    )

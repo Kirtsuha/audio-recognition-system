@@ -1,4 +1,4 @@
-from database_config import SessionLocal
+from repository.database_config import SessionLocal
 
 def get_db():
     db = SessionLocal()

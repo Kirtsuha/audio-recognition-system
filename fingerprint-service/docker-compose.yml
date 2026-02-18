@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+
+  postgres:
+    image: postgres:15
+    container_name: fingerprint_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: fingerprint_user
+      POSTGRES_PASSWORD: fingerprint_pass
+      POSTGRES_DB: fingerprint_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  fingerprint-service:
+    build: .
+    container_name: fingerprint_service
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@postgres:5432/fingerprint_db
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    restart: always
+
+volumes:
+  postgres_data:

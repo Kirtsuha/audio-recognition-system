@@ -2,42 +2,52 @@ version: "3.9"
 
 services:
 
-  postgres:
+  fingerprint-db:
     image: postgres:16
-    container_name: music-postgres
-    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: fingerprint_user
+      POSTGRES_PASSWORD: fingerprint_pass
+      POSTGRES_DB: fingerprint_db
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+      - fingerprint_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+
+  orchestration-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: orch_user
+      POSTGRES_PASSWORD: orch_pass
+      POSTGRES_DB: orchestration_db
+    volumes:
+      - orchestration_data:/var/lib/postgresql/data
+    ports:
+      - "5434:5432"
 
   fingerprint-service:
     build: ./fingerprint-service
-    container_name: fingerprint-service
     depends_on:
-      - postgres
+      - fingerprint-db
     environment:
-      DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@postgres:5432/fingerprint_db
+      DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
     ports:
       - "8000:8000"
 
   orchestration-service:
     build: ./orchestration-service
-    container_name: orchestration-service
     depends_on:
-      - postgres
+      - orchestration-db
       - fingerprint-service
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/orchestration_db
-      SPRING_DATASOURCE_USERNAME: orchestration_user
-      SPRING_DATASOURCE_PASSWORD: orchestration_pass
+      SPRING_DATASOURCE_URL: jdbc:postgresql://orchestration-db:5432/orchestration_db
+      SPRING_DATASOURCE_USERNAME: orch_user
+      SPRING_DATASOURCE_PASSWORD: orch_pass
       FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000/index
+      JWT_SECRET: supersecretkeysupersecretkeysupersecretkey
+      JWT_EXPIRATION: 86400000
     ports:
       - "8080:8080"
 
 volumes:
-  pgdata:
+  fingerprint_data:
+  orchestration_data:
