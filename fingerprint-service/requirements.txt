@@ -2,9 +2,11 @@ fastapi
 uvicorn
 librosa
 numpy
+pandas
 scipy
 python-multipart
 sqlalchemy
 psycopg2-binary
 db
 boto3
+dotenv

@@ -15,6 +15,9 @@ from repository.database_config import engine
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Music Recognition service")
+@app.on_event("startup")
+def init_db():
+    Base.metadata.create_all(engine)
 
 @app.get("/health")
 async def health():
