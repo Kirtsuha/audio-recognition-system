@@ -1,0 +1,52 @@
+version: "3.9"
+
+services:
+
+  postgres:
+    image: postgres:15
+    container_name: fingerprint_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: fingerprint_user
+      POSTGRES_PASSWORD: fingerprint_pass
+      POSTGRES_DB: fingerprint_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  minio:
+    image: minio/minio
+    container_name: fingerprint_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web UI
+    volumes:
+      - minio_data:/data
+    restart: always
+
+  fingerprint-service:
+    build: .
+    container_name: fingerprint_service
+    depends_on:
+      - postgres
+      - minio
+    environment:
+      DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@postgres:5432/fingerprint_db
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: tracks
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    restart: always
+
+volumes:
+  postgres_data:
+  minio_data:

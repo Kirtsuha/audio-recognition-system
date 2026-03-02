@@ -1,7 +1,6 @@
 import librosa
 
 from audio.loader import load_audio
-from audio.preprocess import normalize
 from audio.spectrogram import spectrogram
 
 import matplotlib.pyplot as plt
