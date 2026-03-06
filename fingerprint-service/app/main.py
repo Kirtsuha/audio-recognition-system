@@ -12,7 +12,6 @@ from service.audio2fingerprint import fingerprint_audio
 
 from repository.init_db import Base
 from repository.database_config import engine
-Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Music Recognition service")
 @app.on_event("startup")

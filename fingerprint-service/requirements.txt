@@ -10,3 +10,6 @@ psycopg2-binary
 db
 boto3
 dotenv
+pytest
+httpx
+soundfile
