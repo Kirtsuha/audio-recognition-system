@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
 
 from repository.database_config import Base, engine
+from repository.s3_client import get_s3
 
 # ---------------- CONFIG ----------------
 
@@ -24,14 +25,7 @@ AUDIO_EXT = (".mp3", ".wav", ".flac", ".ogg")
 
 # ---------------- S3 INIT (MINIO) ----------------
 
-s3 = boto3.client(
-    "s3",
-    endpoint_url=S3_ENDPOINT,
-    aws_access_key_id=S3_ACCESS_KEY,
-    aws_secret_access_key=S3_SECRET_KEY,
-    region_name="us-east-1",
-    use_ssl=False
-)
+s3 = get_s3()
 
 # ---------------- REPO / FINGERPRINT ----------------
 from repository.db import get_db

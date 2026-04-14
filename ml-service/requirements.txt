@@ -1,0 +1,7 @@
+boto3
+torch
+librosa
+faiss-cpu
+numpy
+fastapi
+torch.utils

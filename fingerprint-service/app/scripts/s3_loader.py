@@ -3,22 +3,11 @@ import boto3
 from botocore.exceptions import ClientError
 from pathlib import PurePosixPath
 
-S3_ENDPOINT = "http://localhost:9000"
-S3_ACCESS_KEY = "minio"
-S3_SECRET_KEY = "minio123"
-S3_BUCKET = "tracks"
 MAX_FILES = 5000
 
 ZIP_PATH = "D:\\Кирилл\\Downloads\\fma_small.zip"
 
 AUDIO_EXT = (".mp3", ".wav", ".flac", ".ogg")
-
-s3 = boto3.client(
-    "s3",
-    endpoint_url=S3_ENDPOINT,
-    aws_access_key_id=S3_ACCESS_KEY,
-    aws_secret_access_key=S3_SECRET_KEY
-)
 
 
 def is_audio_file(path: str) -> bool:
