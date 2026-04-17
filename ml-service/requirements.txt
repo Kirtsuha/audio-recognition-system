@@ -4,4 +4,7 @@ librosa
 faiss-cpu
 numpy
 fastapi
-torch.utils
+uvicorn
+python-multipart
+kafka-python
+soundfile

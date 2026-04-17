@@ -1,14 +1,19 @@
-\
 from collections import Counter
 
 def aggregate_results(indices, song_ids):
-
     votes = []
 
     for idx_list in indices:
         for idx in idx_list:
             votes.append(song_ids[idx])
 
-    most_common = Counter(votes).most_common(1)
+    if not votes:
+        return None
 
-    return most_common[0][0]
+    most_common = Counter(votes).most_common(1)[0]
+    song_id, count = most_common
+
+    return {
+        "song_id": int(song_id),
+        "confidence": count / len(votes)
+    }
