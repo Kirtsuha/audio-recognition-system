@@ -1,42 +1,49 @@
-
+import os
 import random
-from torch.utils.data import Dataset
+
 import librosa
+from torch.utils.data import Dataset
 
-from s3.s3_loader import download_song
+from pipeline.augment import augment_audio
+from pipeline.config import SR
 from pipeline.dataset import random_segment
-from pipeline.augment import add_noise
+from s3.s3_loader import download_song
 
-from config import SR
 
 class S3TripletDataset(Dataset):
+    def __init__(self, bucket: str, keys: list[str]):
+        if not keys:
+            raise ValueError("keys must not be empty")
 
-    def __init__(self, bucket, keys):
         self.bucket = bucket
         self.keys = keys
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.keys)
 
-    def __getitem__(self, idx):
+    def _load_random_segment(self, key: str):
+        path = download_song(self.bucket, key)
+        try:
+            audio, _ = librosa.load(path, sr=SR, mono=True)
+            return random_segment(audio)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
-        # anchor / positive
-        key_a = self.keys[idx]
-        path_a = download_song(self.bucket, key_a)
+    def __getitem__(self, idx: int):
+        key_anchor = self.keys[idx]
 
-        audio_a, _ = librosa.load(path_a, sr=SR, mono=True)
+        anchor = self._load_random_segment(key_anchor)
+        positive = augment_audio(anchor)
 
-        seg_a1 = random_segment(audio_a)
-        seg_a2 = random_segment(audio_a)
+        neg_idx = random.randrange(len(self.keys))
+        while neg_idx == idx:
+            neg_idx = random.randrange(len(self.keys))
 
-        # augmentation
-        seg_a2 = add_noise(seg_a2)
+        key_negative = self.keys[neg_idx]
+        negative = self._load_random_segment(key_negative)
+        negative = augment_audio(negative) if random.random() < 0.5 else negative
 
-        # negative
-        key_b = random.choice(self.keys)
-        path_b = download_song(self.bucket, key_b)
-
-        audio_b, _ = librosa.load(path_b, sr=SR, mono=True)
-        seg_b = random_segment(audio_b)
-
-        return seg_a1, seg_a2, seg_b
+        return anchor, positive, negative

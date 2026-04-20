@@ -1,24 +1,37 @@
+from pathlib import Path
+from typing import List
+
+import numpy as np
 import torch
 
 from app.model import AudioEncoder
-from pipeline.config import MODEL_PATH, N_SEGMENTS
-from pipeline.dataset import load_audio, random_segment
+from pipeline.config import MODEL_PATH, INDEX_WINDOWS_PER_SONG
+from pipeline.dataset import load_audio, extract_uniform_index_windows
 from pipeline.to_mel import to_mel
 
-model = AudioEncoder()
-model.load_state_dict(torch.load(MODEL_PATH))
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+model = AudioEncoder().to(device)
+state = torch.load(MODEL_PATH, map_location=device)
+
+print("EMBED model: ", type(state))
+print(state.keys() if isinstance(state, dict) else "not dict")
+
+model.load_state_dict(state)
 model.eval()
 
-def embed_song(path, n_segments=N_SEGMENTS):
 
-    audio = load_audio(path)
+def embed_windows(windows: List[np.ndarray]) -> np.ndarray:
+    batch = torch.stack([to_mel(window) for window in windows]).to(device)
 
-    vectors = []
+    with torch.inference_mode():
+        embs = model(batch).cpu().numpy().astype("float32")
 
-    for _ in range(n_segments):
-        seg = random_segment(audio)
-        mel = to_mel(seg).unsqueeze(0)
-        emb = model(mel).detach().numpy()[0]
-        vectors.append(emb)
+    return embs
 
-    return vectors
+
+def embed_song(path: str | Path, n_windows: int = INDEX_WINDOWS_PER_SONG) -> np.ndarray:
+    audio = load_audio(str(path))
+    windows = extract_uniform_index_windows(audio, n_windows=n_windows)
+    return embed_windows(windows)
