@@ -23,10 +23,12 @@ public class RecognitionController {
     @Operation(summary = "Распознать аудиофайл",
             description = "Принимает аудиофайл и возвращает информацию о треке",
             responses = {@ApiResponse(responseCode = "200", description = "Распознано успешно")})
-    public RecognitionResponse recognize(@RequestPart("file") MultipartFile file,
-                                         Principal principal) throws Exception {
+    public RecognitionResponse recognize(@RequestPart("file") MultipartFile file //, Principal principal
+                                         ) throws Exception {
         byte[] bytes = file.getBytes();
-        return recognitionService.recognize(principal.getName(), file.getOriginalFilename(), bytes);
+
+        return recognitionService.recognize("UNAUTHORIZED", file.getOriginalFilename(), bytes); //TODO fix principals
+        //  recognitionService.recognize(principal.getName(), file.getOriginalFilename(), bytes);
     }
 
 }

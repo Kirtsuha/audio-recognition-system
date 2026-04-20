@@ -7,6 +7,8 @@ from config.config import SAMPLE_RATE
 
 def fingerprint_audio(path: str):
     audio, sr = load_audio(path, sr=SAMPLE_RATE)
+    print("audio shape:", audio.shape)
+    print("audio ndim:", audio.ndim)
     audio = normalize(audio)
     S_db = spectrogram(audio, sr)
     peaks = find_peaks(S_db)
