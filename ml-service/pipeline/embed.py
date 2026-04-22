@@ -12,17 +12,16 @@ from pipeline.to_mel import to_mel
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model = AudioEncoder().to(device)
-state = torch.load(MODEL_PATH, map_location=device)
 
-print("EMBED model: ", type(state))
-print(state.keys() if isinstance(state, dict) else "not dict")
+def load_model() -> AudioEncoder:
+    model = AudioEncoder().to(device)
+    state = torch.load(MODEL_PATH, map_location=device)
+    model.load_state_dict(state)
+    model.eval()
+    return model
 
-model.load_state_dict(state)
-model.eval()
 
-
-def embed_windows(windows: List[np.ndarray]) -> np.ndarray:
+def embed_windows(model: AudioEncoder, windows: List[np.ndarray]) -> np.ndarray:
     batch = torch.stack([to_mel(window) for window in windows]).to(device)
 
     with torch.inference_mode():
@@ -32,6 +31,7 @@ def embed_windows(windows: List[np.ndarray]) -> np.ndarray:
 
 
 def embed_song(path: str | Path, n_windows: int = INDEX_WINDOWS_PER_SONG) -> np.ndarray:
+    model = load_model()
     audio = load_audio(str(path))
     windows = extract_uniform_index_windows(audio, n_windows=n_windows)
-    return embed_windows(windows)
+    return embed_windows(model, windows)

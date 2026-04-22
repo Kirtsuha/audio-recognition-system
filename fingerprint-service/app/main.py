@@ -17,7 +17,7 @@ from service.postgres_loader_pipeline import process_s3_bucket
 from repository.init_db import Base
 from repository.database_config import engine
 
-app = FastAPI(title="Music Recognition service")
+app = FastAPI(title="Fingerprint Music Recognition service")
 
 
 @app.on_event("startup")

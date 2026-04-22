@@ -6,6 +6,7 @@ import os
 import tempfile
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import faiss
@@ -17,8 +18,10 @@ from kafka import KafkaConsumer, KafkaProducer
 from app.inference import aggregate_results
 from app.model import AudioEncoder
 from app.schemas import AsyncJobResponse, RecognitionResponse, TrainFromS3Request
-from data.build_index import build_faiss_index
-from pipeline.build_embeddings_from_s3 import build_embeddings_from_s3
+from pipeline.build_index import build_faiss_index
+from pipeline.build_embedings_from_s3 import build_embeddings_from_s3
+from app.logging_utils import configure_logging, log_stage
+
 from pipeline.config import (
     MODEL_PATH,
     SONG_IDS_PATH,
@@ -32,9 +35,9 @@ from pipeline.dataset import extract_sliding_windows, load_audio
 from pipeline.to_mel import to_mel
 from pipeline.train import train as train_from_s3_impl
 
-app = FastAPI()
+app = FastAPI(title="ML Music Recognition fallback")
+configure_logging()
 logger = logging.getLogger("ml-service")
-logging.basicConfig(level=logging.INFO)
 
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
 ML_REQUEST_TOPIC = os.getenv("ML_REQUEST_TOPIC", "ml-recognition-requests")
@@ -57,11 +60,43 @@ train_in_progress = False
 build_in_progress = False
 bootstrap_in_progress = False
 
+job_status_lock = threading.Lock()
+
+job_status = {
+    "current_job": None,
+    "phase": None,
+    "started_at": None,
+    "finished_at": None,
+    "last_error": None,
+    "last_success": None,
+    "progress": {},
+}
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def update_job_status(**fields) -> None:
+    with job_status_lock:
+        job_status.update(fields)
+
+
+def update_job_progress(**fields) -> None:
+    with job_status_lock:
+        progress = dict(job_status.get("progress", {}))
+        progress.update(fields)
+        job_status["progress"] = progress
+
+
+def reset_job_progress() -> None:
+    with job_status_lock:
+        job_status["progress"] = {}
 
 def load_runtime_artifacts() -> None:
     global model, index, song_ids
 
     with runtime_lock:
+        started = time.time()
         missing = []
 
         if not os.path.exists(MODEL_PATH):
@@ -77,6 +112,8 @@ def load_runtime_artifacts() -> None:
             index = None
             song_ids = None
             return
+
+        logger.info("Loading runtime artifacts model=%s index=%s song_ids=%s", MODEL_PATH, FAISS_INDEX_PATH, SONG_IDS_PATH)
 
         loaded_model = AudioEncoder().to(device)
         state = torch.load(MODEL_PATH, map_location=device)
@@ -96,11 +133,13 @@ def load_runtime_artifacts() -> None:
         index = loaded_index
         song_ids = loaded_song_ids
 
+        elapsed = time.time() - started
         logger.info(
-            "Runtime loaded successfully: model=%s, index_vectors=%s, device=%s",
-            MODEL_PATH,
-            loaded_index.ntotal,
+            "Runtime loaded successfully elapsed_sec=%.2f device=%s index_vectors=%s index_dim=%s",
+            elapsed,
             device,
+            loaded_index.ntotal,
+            loaded_index.d,
         )
 
 
@@ -139,6 +178,8 @@ def recognize_audio_bytes(audio_bytes: bytes) -> dict[str, Any]:
     assert index is not None
     assert song_ids is not None
 
+    started = time.time()
+
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp.write(audio_bytes)
         temp_path = tmp.name
@@ -155,6 +196,7 @@ def recognize_audio_bytes(audio_bytes: bytes) -> dict[str, Any]:
 
         result = aggregate_results(scores=scores, indices=nearest, song_ids=song_ids)
         if result is None:
+            logger.info("Recognition finished matched=false reason=no_candidates windows=%s elapsed_sec=%.2f", len(windows), time.time() - started)
             return {
                 "matched": False,
                 "reason": "no_candidates",
@@ -166,6 +208,17 @@ def recognize_audio_bytes(audio_bytes: bytes) -> dict[str, Any]:
 
         if not accepted:
             result["reason"] = "low_confidence"
+
+        logger.info(
+            "Recognition finished matched=%s song_id=%s confidence=%.4f margin=%.4f support=%s windows=%s elapsed_sec=%.2f",
+            accepted,
+            result.get("song_id"),
+            result.get("confidence", 0.0),
+            result.get("margin", 0.0),
+            result.get("support"),
+            len(windows),
+            time.time() - started,
+        )
 
         return result
 
@@ -255,11 +308,30 @@ def _run_training_job(bucket: str, prefix: str) -> None:
             return
         train_in_progress = True
 
+    update_job_status(
+        current_job="train-from-s3",
+        phase="training",
+        started_at=utc_now_iso(),
+        finished_at=None,
+        last_error=None,
+    )
+    reset_job_progress()
+
     try:
-        logger.info("Training started: bucket=%s prefix=%s", bucket, prefix)
-        train_from_s3_impl(bucket=bucket, prefix=prefix)
-        logger.info("Training finished successfully")
-    except Exception:  # noqa: BLE001
+        with log_stage(logger, "train-from-s3", bucket=bucket, prefix=prefix):
+            train_from_s3_impl(bucket=bucket, prefix=prefix)
+
+        update_job_status(
+            phase="done",
+            finished_at=utc_now_iso(),
+            last_success=utc_now_iso(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        update_job_status(
+            phase="failed",
+            finished_at=utc_now_iso(),
+            last_error=str(exc),
+        )
         logger.exception("Training failed")
     finally:
         train_in_progress = False
@@ -274,12 +346,35 @@ def _run_build_index_job(bucket: str, prefix: str) -> None:
             return
         build_in_progress = True
 
+    update_job_status(
+        current_job="build-index-from-s3",
+        phase="embedding_build",
+        started_at=utc_now_iso(),
+        finished_at=None,
+        last_error=None,
+    )
+    reset_job_progress()
+
     try:
-        logger.info("Embedding/index build started: bucket=%s prefix=%s", bucket, prefix)
-        build_embeddings_from_s3(bucket=bucket, prefix=prefix)
-        build_faiss_index()
-        logger.info("Embedding/index build finished successfully")
-    except Exception:  # noqa: BLE001
+        with log_stage(logger, "build-embeddings-from-s3", bucket=bucket, prefix=prefix):
+            build_embeddings_from_s3(bucket=bucket, prefix=prefix)
+
+        update_job_status(phase="index_build")
+
+        with log_stage(logger, "build-faiss-index"):
+            build_faiss_index()
+
+        update_job_status(
+            phase="done",
+            finished_at=utc_now_iso(),
+            last_success=utc_now_iso(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        update_job_status(
+            phase="failed",
+            finished_at=utc_now_iso(),
+            last_error=str(exc),
+        )
         logger.exception("Embedding/index build failed")
     finally:
         build_in_progress = False
@@ -294,20 +389,54 @@ def _run_bootstrap_job(bucket: str, prefix: str) -> None:
             return
         bootstrap_in_progress = True
 
+    update_job_status(
+        current_job="bootstrap-from-s3",
+        phase="training",
+        started_at=utc_now_iso(),
+        finished_at=None,
+        last_error=None,
+    )
+    reset_job_progress()
+
+    total_started = time.time()
+
     try:
-        logger.info("Bootstrap started: bucket=%s prefix=%s", bucket, prefix)
+        with log_stage(logger, "bootstrap", bucket=bucket, prefix=prefix):
+            with log_stage(logger, "bootstrap.training", bucket=bucket, prefix=prefix):
+                update_job_status(phase="training")
+                train_from_s3_impl(bucket=bucket, prefix=prefix)
 
-        train_from_s3_impl(bucket=bucket, prefix=prefix)
-        build_embeddings_from_s3(bucket=bucket, prefix=prefix)
-        build_faiss_index()
-        load_runtime_artifacts()
+            with log_stage(logger, "bootstrap.embedding_build", bucket=bucket, prefix=prefix):
+                update_job_status(phase="embedding_build")
+                build_embeddings_from_s3(bucket=bucket, prefix=prefix)
 
-        logger.info("Bootstrap finished successfully")
-    except Exception:  # noqa: BLE001
-        logger.exception("Bootstrap failed")
+            with log_stage(logger, "bootstrap.index_build"):
+                update_job_status(phase="index_build")
+                build_faiss_index()
+
+            with log_stage(logger, "bootstrap.reload_runtime"):
+                update_job_status(phase="reload_runtime")
+                load_runtime_artifacts()
+
+        elapsed = time.time() - total_started
+        logger.info("Bootstrap finished successfully total_elapsed_sec=%.2f", elapsed)
+
+        update_job_status(
+            phase="done",
+            finished_at=utc_now_iso(),
+            last_success=utc_now_iso(),
+        )
+    except Exception as exc:  # noqa: BLE001
+        elapsed = time.time() - total_started
+        logger.exception("Bootstrap failed total_elapsed_sec=%.2f", elapsed)
+
+        update_job_status(
+            phase="failed",
+            finished_at=utc_now_iso(),
+            last_error=str(exc),
+        )
     finally:
         bootstrap_in_progress = False
-
 
 @app.on_event("startup")
 def startup() -> None:
@@ -388,6 +517,9 @@ async def reload_runtime_endpoint():
 
 @app.get("/admin/status")
 async def admin_status():
+    with job_status_lock:
+        current = dict(job_status)
+
     return {
         "train_in_progress": train_in_progress,
         "build_in_progress": build_in_progress,
@@ -396,6 +528,7 @@ async def admin_status():
         "model_exists": os.path.exists(MODEL_PATH),
         "index_exists": os.path.exists(FAISS_INDEX_PATH),
         "song_ids_exists": os.path.exists(SONG_IDS_PATH),
+        "job_status": current,
     }
 
 

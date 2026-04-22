@@ -9,11 +9,6 @@ def aggregate_results(
     indices: np.ndarray,
     song_ids: np.ndarray,
 ) -> dict[str, Any] | None:
-    """
-    scores:  [num_query_windows, k]
-    indices: [num_query_windows, k]
-    """
-
     if scores.size == 0 or indices.size == 0:
         return None
 
@@ -72,6 +67,7 @@ def aggregate_results(
         )
 
     candidates.sort(key=lambda x: x["final_score"], reverse=True)
+
     top1 = candidates[0]
     top2 = candidates[1] if len(candidates) > 1 else None
 

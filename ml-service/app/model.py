@@ -8,9 +8,24 @@ from pipeline.config import EMB_DIM
 class ResidualBlock(nn.Module):
     def __init__(self, in_ch: int, out_ch: int, stride: int = 1):
         super().__init__()
-        self.conv1 = nn.Conv2d(in_ch, out_ch, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(
+            in_ch,
+            out_ch,
+            kernel_size=3,
+            stride=stride,
+            padding=1,
+            bias=False,
+        )
         self.bn1 = nn.BatchNorm2d(out_ch)
-        self.conv2 = nn.Conv2d(out_ch, out_ch, kernel_size=3, stride=1, padding=1, bias=False)
+
+        self.conv2 = nn.Conv2d(
+            out_ch,
+            out_ch,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=False,
+        )
         self.bn2 = nn.BatchNorm2d(out_ch)
 
         if in_ch != out_ch or stride != 1:
@@ -59,7 +74,7 @@ class AudioEncoder(nn.Module):
             nn.Flatten(),
             nn.Linear(128, 256),
             nn.ReLU(inplace=True),
-            nn.Dropout(p=0.1),
+            nn.Dropout(0.1),
             nn.Linear(256, emb_dim),
         )
 

@@ -125,8 +125,17 @@ services:
       ML_REQUEST_TOPIC: ml-recognition-requests
       ML_RESPONSE_TOPIC: ml-recognition-responses
       KAFKA_CONSUMER_GROUP: ml-service
+      MODEL_PATH: /app/data/model.pt
+      EMBEDDINGS_PATH: /app/data/embeddings.npy
+      SONG_IDS_PATH: /app/data/song_ids.npy
+      FAISS_INDEX_PATH: /app/data/faiss.index
+      SONG_MANIFEST_PATH: /app/data/song_manifest.json
+      NUM_WORKERS: 0
     ports:
       - "8010:8010"
+    volumes:
+      - ml_service_data:/app/data
+    shm_size: "1gb"
 
   orchestration-service:
     build:
@@ -161,3 +170,4 @@ volumes:
   orchestration_postgres_data:
   minio_data:
   kafka_data:
+  ml_service_data:

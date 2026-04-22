@@ -4,7 +4,7 @@ from typing import List
 import librosa
 import numpy as np
 
-from pipeline.config import SR, SEGMENT_SECONDS, MAX_QUERY_WINDOWS, WINDOW_HOP_SECONDS
+from pipeline.config import SR, SEGMENT_SECONDS, WINDOW_HOP_SECONDS, MAX_QUERY_WINDOWS
 
 
 def load_audio(path: str) -> np.ndarray:
@@ -64,7 +64,7 @@ def extract_sliding_windows(
         chosen = np.linspace(0, len(starts) - 1, max_windows).astype(int)
         starts = [starts[i] for i in chosen]
 
-    return [audio[s : s + window_len].astype(np.float32) for s in starts]
+    return [audio[s:s + window_len].astype(np.float32) for s in starts]
 
 
 def extract_uniform_index_windows(audio: np.ndarray, n_windows: int, window_seconds: float = SEGMENT_SECONDS) -> List[np.ndarray]:
@@ -75,4 +75,5 @@ def extract_uniform_index_windows(audio: np.ndarray, n_windows: int, window_seco
 
     max_start = len(audio) - window_len
     starts = np.linspace(0, max_start, n_windows).astype(int)
-    return [audio[s : s + window_len].astype(np.float32) for s in starts]
+
+    return [audio[s:s + window_len].astype(np.float32) for s in starts]

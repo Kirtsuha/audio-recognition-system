@@ -7,11 +7,14 @@ from pipeline.config import SR
 
 def add_gaussian_noise(audio: np.ndarray, snr_db_min: float = 5.0, snr_db_max: float = 25.0) -> np.ndarray:
     snr_db = random.uniform(snr_db_min, snr_db_max)
+
     signal_power = np.mean(audio ** 2) + 1e-8
     noise_power = signal_power / (10 ** (snr_db / 10.0))
+
     noise = np.random.randn(len(audio)).astype(np.float32)
     noise = noise / (np.std(noise) + 1e-8)
     noise = noise * np.sqrt(noise_power)
+
     return (audio + noise).astype(np.float32)
 
 

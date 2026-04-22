@@ -17,6 +17,6 @@ def to_mel(audio: np.ndarray, sr: int = SR) -> torch.Tensor:
         fmax=FMAX,
         power=2.0,
     )
-    mel_db = librosa.power_to_db(mel, ref=np.max)
-    mel_db = mel_db.astype(np.float32)
+
+    mel_db = librosa.power_to_db(mel, ref=np.max).astype(np.float32)
     return torch.from_numpy(mel_db).unsqueeze(0)  # [1, n_mels, time]
