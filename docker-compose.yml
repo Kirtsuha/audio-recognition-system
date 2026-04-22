@@ -110,6 +110,7 @@ services:
   ml-service:
     build:
       context: ./ml-service
+      dockerfile: Dockerfile
     depends_on:
       kafka:
         condition: service_healthy
@@ -121,20 +122,66 @@ services:
       S3_SECRET_KEY: minio123
       S3_BUCKET: tracks
       S3_PREFIX: fma/
+      TRACKS_DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       ML_REQUEST_TOPIC: ml-recognition-requests
       ML_RESPONSE_TOPIC: ml-recognition-responses
       KAFKA_CONSUMER_GROUP: ml-service
-      MODEL_PATH: /app/data/model.pt
-      EMBEDDINGS_PATH: /app/data/embeddings.npy
-      SONG_IDS_PATH: /app/data/song_ids.npy
-      FAISS_INDEX_PATH: /app/data/faiss.index
-      SONG_MANIFEST_PATH: /app/data/song_manifest.json
+      ARTIFACTS_DIR: /app/artifacts
+      ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
+      RUNS_DIR: /app/artifacts/runs
+      JOB_STATUS_PATH: /app/artifacts/job_status.json
+      MODEL_PATH: /app/artifacts/active/model.pt
+      EMBEDDINGS_PATH: /app/artifacts/active/embeddings.npy
+      SONG_IDS_PATH: /app/artifacts/active/song_ids.npy
+      FAISS_INDEX_PATH: /app/artifacts/active/faiss.index
+      SONG_MANIFEST_PATH: /app/artifacts/active/song_manifest.json
+      PREPARED_DATA_DIR: /app/prepared-data
+      PREPARED_DATASET_DIR: /app/prepared-data/dataset_v1
+      PREPARED_TRACKS_DIR: /app/prepared-data/dataset_v1/tracks
+      PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
+      INVALID_KEYS_PATH: /app/prepared-data/dataset_v1/invalid_keys.json
+      METRICS_PATH: /app/artifacts/active/metrics.json
       NUM_WORKERS: 0
     ports:
       - "8010:8010"
     volumes:
-      - ml_service_data:/app/data
+      - ml_artifacts:/app/artifacts
+      - ml_prepared_data:/app/prepared-data
+    shm_size: "1gb"
+
+  ml-pipeline-runner:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile.pipeline
+    depends_on:
+      fingerprint-db:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: tracks
+      S3_PREFIX: fma/
+      TRACKS_DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
+      ARTIFACTS_DIR: /app/artifacts
+      ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
+      RUNS_DIR: /app/artifacts/runs
+      JOB_STATUS_PATH: /app/artifacts/job_status.json
+      PREPARED_DATA_DIR: /app/prepared-data
+      PREPARED_DATASET_DIR: /app/prepared-data/dataset_v1
+      PREPARED_TRACKS_DIR: /app/prepared-data/dataset_v1/tracks
+      PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
+      INVALID_KEYS_PATH: /app/prepared-data/dataset_v1/invalid_keys.json
+      METRICS_PATH: /app/artifacts/active/metrics.json
+      NUM_WORKERS: 0
+    ports:
+      - "8011:8011"
+    volumes:
+      - ml_artifacts:/app/artifacts
+      - ml_prepared_data:/app/prepared-data
     shm_size: "1gb"
 
   orchestration-service:
@@ -170,4 +217,5 @@ volumes:
   orchestration_postgres_data:
   minio_data:
   kafka_data:
-  ml_service_data:
+  ml_artifacts:
+  ml_prepared_data:

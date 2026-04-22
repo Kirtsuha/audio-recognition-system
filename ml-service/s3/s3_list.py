@@ -25,4 +25,4 @@ def list_all_songs(bucket: str, prefix: str = "fma/") -> list[str]:
         else:
             break
 
-    return keys
+    return sorted(keys)

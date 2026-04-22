@@ -2,7 +2,26 @@ from pathlib import Path
 import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
+
+# Online active artifacts
+ARTIFACTS_DIR = Path(os.getenv("ARTIFACTS_DIR", "/app/artifacts"))
+ACTIVE_ARTIFACTS_DIR = Path(os.getenv("ACTIVE_ARTIFACTS_DIR", str(ARTIFACTS_DIR / "active")))
+RUNS_DIR = Path(os.getenv("RUNS_DIR", str(ARTIFACTS_DIR / "runs")))
+JOB_STATUS_PATH = Path(os.getenv("JOB_STATUS_PATH", str(ARTIFACTS_DIR / "job_status.json")))
+
+MODEL_PATH = Path(os.getenv("MODEL_PATH", str(ACTIVE_ARTIFACTS_DIR / "model.pt")))
+EMBEDDINGS_PATH = Path(os.getenv("EMBEDDINGS_PATH", str(ACTIVE_ARTIFACTS_DIR / "embeddings.npy")))
+SONG_IDS_PATH = Path(os.getenv("SONG_IDS_PATH", str(ACTIVE_ARTIFACTS_DIR / "song_ids.npy")))
+FAISS_INDEX_PATH = Path(os.getenv("FAISS_INDEX_PATH", str(ACTIVE_ARTIFACTS_DIR / "faiss.index")))
+SONG_MANIFEST_PATH = Path(os.getenv("SONG_MANIFEST_PATH", str(ACTIVE_ARTIFACTS_DIR / "song_manifest.json")))
+METRICS_PATH = Path(os.getenv("METRICS_PATH", str(ACTIVE_ARTIFACTS_DIR / "metrics.json")))
+
+# Prepared dataset
+PREPARED_DATA_DIR = Path(os.getenv("PREPARED_DATA_DIR", "/app/prepared-data"))
+PREPARED_DATASET_DIR = Path(os.getenv("PREPARED_DATASET_DIR", str(PREPARED_DATA_DIR / "dataset_v1")))
+PREPARED_TRACKS_DIR = Path(os.getenv("PREPARED_TRACKS_DIR", str(PREPARED_DATASET_DIR / "tracks")))
+PREPARED_MANIFEST_PATH = Path(os.getenv("PREPARED_MANIFEST_PATH", str(PREPARED_DATASET_DIR / "manifest.jsonl")))
+INVALID_KEYS_PATH = Path(os.getenv("INVALID_KEYS_PATH", str(PREPARED_DATASET_DIR / "invalid_keys.json")))
 
 # Audio
 SR = int(os.getenv("SR", "16000"))
@@ -34,10 +53,4 @@ NUM_WORKERS = int(os.getenv("NUM_WORKERS", "0"))
 LR = float(os.getenv("LR", "1e-3"))
 EPOCHS = int(os.getenv("EPOCHS", "10"))
 MARGIN = float(os.getenv("MARGIN", "0.30"))
-
-# Paths
-MODEL_PATH = Path(os.getenv("MODEL_PATH", str(DATA_DIR / "model.pt")))
-EMBEDDINGS_PATH = Path(os.getenv("EMBEDDINGS_PATH", str(DATA_DIR / "embeddings.npy")))
-SONG_IDS_PATH = Path(os.getenv("SONG_IDS_PATH", str(DATA_DIR / "song_ids.npy")))
-FAISS_INDEX_PATH = Path(os.getenv("FAISS_INDEX_PATH", str(DATA_DIR / "faiss.index")))
-SONG_MANIFEST_PATH = Path(os.getenv("SONG_MANIFEST_PATH", str(DATA_DIR / "song_manifest.json")))
+TRAIN_NEGATIVE_RETRIES = int(os.getenv("TRAIN_NEGATIVE_RETRIES", "10"))

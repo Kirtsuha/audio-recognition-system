@@ -1,10 +1,19 @@
+import hashlib
+import json
 import random
+from pathlib import Path
 from typing import List
 
 import librosa
 import numpy as np
 
-from pipeline.config import SR, SEGMENT_SECONDS, WINDOW_HOP_SECONDS, MAX_QUERY_WINDOWS
+from pipeline.config import (
+    SR,
+    SEGMENT_SECONDS,
+    WINDOW_HOP_SECONDS,
+    MAX_QUERY_WINDOWS,
+    PREPARED_MANIFEST_PATH,
+)
 
 
 def load_audio(path: str) -> np.ndarray:
@@ -77,3 +86,24 @@ def extract_uniform_index_windows(audio: np.ndarray, n_windows: int, window_seco
     starts = np.linspace(0, max_start, n_windows).astype(int)
 
     return [audio[s:s + window_len].astype(np.float32) for s in starts]
+
+
+def assign_split(track_id: int) -> str:
+    digest = hashlib.md5(str(track_id).encode("utf-8")).hexdigest()
+    bucket = int(digest[:8], 16) % 100
+
+    if bucket < 80:
+        return "train"
+    if bucket < 90:
+        return "val"
+    return "test"
+
+
+def iter_prepared_manifest(path: Path = PREPARED_MANIFEST_PATH):
+    if not path.exists():
+        return
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                yield json.loads(line)

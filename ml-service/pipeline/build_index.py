@@ -1,49 +1,72 @@
 import logging
 import time
+from pathlib import Path
 
 import faiss
 import numpy as np
 
-from pipeline.config import EMBEDDINGS_PATH, SONG_IDS_PATH, FAISS_INDEX_PATH
-
-logger = logging.getLogger("ml-service.index-build")
+logger = logging.getLogger("ml-pipeline.index-build")
 
 
-def build_faiss_index() -> None:
+def build_faiss_index(
+    embeddings_path: str | Path,
+    song_ids_path: str | Path,
+    index_out_path: str | Path,
+) -> None:
     started = time.time()
 
-    logger.info("FAISS index build started embeddings_path=%s song_ids_path=%s", EMBEDDINGS_PATH, SONG_IDS_PATH)
-
-    embeddings = np.load(EMBEDDINGS_PATH).astype("float32")
-    song_ids = np.load(SONG_IDS_PATH)
+    embeddings = np.load(embeddings_path).astype("float32")
+    song_ids = np.load(song_ids_path)
 
     if embeddings.ndim != 2:
         raise ValueError(f"Expected embeddings shape [N, D], got {embeddings.shape}")
 
     if len(embeddings) != len(song_ids):
-        raise ValueError("embeddings.npy and song_ids.npy have different lengths")
+        raise ValueError("embeddings and song_ids have different lengths")
 
     faiss.normalize_L2(embeddings)
-
     dim = embeddings.shape[1]
+
     index = faiss.IndexFlatIP(dim)
     index.add(embeddings)
 
-    faiss.write_index(index, str(FAISS_INDEX_PATH))
+    index_out_path = Path(index_out_path)
+    index_out_path.parent.mkdir(parents=True, exist_ok=True)
+    faiss.write_index(index, str(index_out_path))
 
-    elapsed = time.time() - started
     logger.info(
-        "FAISS index build finished vectors=%s dim=%s elapsed_sec=%.2f index_path=%s",
+        "FAISS index build finished vectors=%s dim=%s elapsed_sec=%.2f path=%s",
         index.ntotal,
         dim,
-        elapsed,
-        FAISS_INDEX_PATH,
+        time.time() - started,
+        index_out_path,
     )
 
 
-def main() -> None:
-    build_faiss_index()
+def append_to_faiss_index(
+    base_index_path: str | Path,
+    new_embeddings_path: str | Path,
+    index_out_path: str | Path,
+) -> None:
+    started = time.time()
 
+    index = faiss.read_index(str(base_index_path))
+    new_embeddings = np.load(new_embeddings_path).astype("float32")
 
-if __name__ == "__main__":
-    main()
+    if new_embeddings.ndim != 2:
+        raise ValueError(f"Expected new embeddings shape [N, D], got {new_embeddings.shape}")
+
+    faiss.normalize_L2(new_embeddings)
+    index.add(new_embeddings)
+
+    index_out_path = Path(index_out_path)
+    index_out_path.parent.mkdir(parents=True, exist_ok=True)
+    faiss.write_index(index, str(index_out_path))
+
+    logger.info(
+        "FAISS index append finished added=%s total=%s elapsed_sec=%.2f path=%s",
+        len(new_embeddings),
+        index.ntotal,
+        time.time() - started,
+        index_out_path,
+    )
