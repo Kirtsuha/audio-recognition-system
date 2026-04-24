@@ -1,6 +1,5 @@
 import json
 import logging
-import random
 from pathlib import Path
 
 import faiss
@@ -9,33 +8,65 @@ import torch
 
 from app.model import AudioEncoder
 from pipeline.augment import augment_audio
-from pipeline.config import INDEX_WINDOWS_PER_SONG
+from pipeline.config import INDEX_WINDOWS_PER_SONG, CACHE_PREPARED_IN_MEMORY, CACHE_PREPARED_MAX_TRACKS
 from pipeline.dataset import iter_prepared_manifest, random_segment, pad_or_trim
 from pipeline.to_mel import to_mel
 
 logger = logging.getLogger("ml-pipeline.evaluate")
 
 
-def evaluate_prepared(model_path: str | Path, output_metrics_path: str | Path) -> dict:
+class PreparedAudioCache:
+    def __init__(self, enabled: bool = CACHE_PREPARED_IN_MEMORY, max_tracks: int = CACHE_PREPARED_MAX_TRACKS):
+        self.enabled = enabled
+        self.max_tracks = max_tracks
+        self._cache: dict[str, np.ndarray] = {}
+
+    def load(self, path: str) -> np.ndarray:
+        if not self.enabled:
+            return np.load(path).astype("float32")
+
+        cached = self._cache.get(path)
+        if cached is not None:
+            return cached
+
+        audio = np.load(path).astype("float32")
+        if self.max_tracks <= 0 or len(self._cache) < self.max_tracks:
+            self._cache[path] = audio
+        return audio
+
+
+def evaluate_prepared(
+    model_path: str | Path,
+    output_metrics_path: str | Path,
+    val_limit: int | None = None,
+    eval_query_limit: int | None = None,
+    index_windows_override: int | None = None,
+) -> dict:
     val_items = [row for row in iter_prepared_manifest() if row["split"] == "val"]
+    if val_limit is not None:
+        val_items = val_items[:val_limit]
+
     if len(val_items) < 5:
         raise ValueError("Need at least 5 validation items for evaluation")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cache = PreparedAudioCache()
 
     model = AudioEncoder().to(device)
     state = torch.load(model_path, map_location=device)
     model.load_state_dict(state)
     model.eval()
 
-    # Build reference index from validation items as baseline
+    windows_per_song = index_windows_override if index_windows_override is not None else INDEX_WINDOWS_PER_SONG
+
     ref_embeddings = []
     ref_song_ids = []
 
     for row in val_items:
-        audio = np.load(row["prepared_path"]).astype("float32")
+        audio = cache.load(row["prepared_path"])
+
         windows = []
-        for _ in range(INDEX_WINDOWS_PER_SONG):
+        for _ in range(windows_per_song):
             windows.append(pad_or_trim(random_segment(audio)))
 
         batch = torch.stack([to_mel(w) for w in windows]).to(device)
@@ -52,12 +83,16 @@ def evaluate_prepared(model_path: str | Path, output_metrics_path: str | Path) -
     index = faiss.IndexFlatIP(ref_embeddings.shape[1])
     index.add(ref_embeddings)
 
+    query_items = list(val_items)
+    if eval_query_limit is not None:
+        query_items = query_items[:eval_query_limit]
+
     correct_at_1 = 0
     correct_at_5 = 0
     total = 0
 
-    for row in val_items:
-        audio = np.load(row["prepared_path"]).astype("float32")
+    for row in query_items:
+        audio = cache.load(row["prepared_path"])
         query = pad_or_trim(augment_audio(random_segment(audio)))
         batch = torch.stack([to_mel(query)]).to(device)
 
@@ -79,6 +114,9 @@ def evaluate_prepared(model_path: str | Path, output_metrics_path: str | Path) -
         "count": total,
         "recall_at_1": correct_at_1 / total if total else 0.0,
         "recall_at_5": correct_at_5 / total if total else 0.0,
+        "val_limit": val_limit,
+        "eval_query_limit": eval_query_limit,
+        "index_windows_per_song": windows_per_song,
     }
 
     output_metrics_path = Path(output_metrics_path)

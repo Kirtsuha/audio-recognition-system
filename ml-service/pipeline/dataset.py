@@ -14,6 +14,7 @@ from pipeline.config import (
     MAX_QUERY_WINDOWS,
     PREPARED_MANIFEST_PATH,
 )
+from pipeline.experiment_utils import apply_split_limits
 
 
 def load_audio(path: str) -> np.ndarray:
@@ -107,3 +108,21 @@ def iter_prepared_manifest(path: Path = PREPARED_MANIFEST_PATH):
             line = line.strip()
             if line:
                 yield json.loads(line)
+
+
+def load_prepared_manifest(
+    train_limit: int = 0,
+    val_limit: int = 0,
+    test_limit: int = 0,
+    path: Path = PREPARED_MANIFEST_PATH,
+) -> list[dict]:
+    rows = list(iter_prepared_manifest(path=path))
+    if not rows:
+        return []
+
+    return apply_split_limits(
+        rows,
+        train_limit=train_limit,
+        val_limit=val_limit,
+        test_limit=test_limit,
+    )

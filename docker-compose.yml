@@ -143,6 +143,15 @@ services:
       INVALID_KEYS_PATH: /app/prepared-data/dataset_v1/invalid_keys.json
       METRICS_PATH: /app/artifacts/active/metrics.json
       NUM_WORKERS: 0
+      EVAL_DIR: /app/artifacts/eval
+      EVAL_QUERIES_PATH: /app/artifacts/eval/eval_queries.jsonl
+      EVAL_RESULTS_PATH: /app/artifacts/eval/eval_results.jsonl
+      EVAL_METRICS_PATH: /app/artifacts/eval/eval_metrics.json
+      THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
+      FAST_AUGMENT: "true"
+      CACHE_PREPARED_IN_MEMORY: "true"
+      CACHE_PREPARED_MAX_TRACKS: "1000"
+      TORCHAUDIO_MEL_DEVICE: "cpu"
     ports:
       - "8010:8010"
     volumes:
@@ -177,6 +186,15 @@ services:
       INVALID_KEYS_PATH: /app/prepared-data/dataset_v1/invalid_keys.json
       METRICS_PATH: /app/artifacts/active/metrics.json
       NUM_WORKERS: 0
+      EVAL_DIR: /app/artifacts/eval
+      EVAL_QUERIES_PATH: /app/artifacts/eval/eval_queries.jsonl
+      EVAL_RESULTS_PATH: /app/artifacts/eval/eval_results.jsonl
+      EVAL_METRICS_PATH: /app/artifacts/eval/eval_metrics.json
+      THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
+      FAST_AUGMENT: "true"
+      CACHE_PREPARED_IN_MEMORY: "true"
+      CACHE_PREPARED_MAX_TRACKS: "1000"
+      TORCHAUDIO_MEL_DEVICE: "cpu"
     ports:
       - "8011:8011"
     volumes:

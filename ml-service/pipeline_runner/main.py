@@ -5,12 +5,12 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
 from app.logging_utils import configure_logging, log_stage
-from app.schemas import AsyncJobResponse, PipelineRequest
+from app.schemas import AsyncJobResponse, PipelineRequest, ExperimentRunRequest
 from pipeline.build_embeddings_from_prepared import build_embeddings_from_prepared
 from pipeline.build_index import build_faiss_index
+from pipeline.incremental_sync import build_incremental_run
 from pipeline.config import RUNS_DIR
 from pipeline.evaluate_prepared import evaluate_prepared
-from pipeline.incremental_sync import build_incremental_run
 from pipeline.job_status import get_status, reset_progress, update_status
 from pipeline.prepare_data import prepare_data
 from pipeline.promote import promote_run_to_active
@@ -105,6 +105,112 @@ def run_full_pipeline(bucket: str, prefix: str) -> None:
         pipeline_in_progress = False
 
 
+def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
+    global pipeline_in_progress
+    if pipeline_in_progress:
+        return
+
+    pipeline_in_progress = True
+    run_dir = make_run_dir(f"exp_{payload.experiment_name}")
+
+    update_status(
+        current_job="experiment-pipeline",
+        phase="prepare-data",
+        started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        finished_at=None,
+        last_error=None,
+        progress={
+            "run_dir": str(run_dir),
+            "experiment_name": payload.experiment_name,
+            "train_limit": payload.train_limit,
+            "val_limit": payload.val_limit,
+            "test_limit": payload.test_limit,
+            "epochs_override": payload.epochs_override,
+            "eval_query_limit": payload.eval_query_limit,
+            "index_windows_override": payload.index_windows_override,
+        },
+    )
+    reset_progress()
+
+    try:
+        with log_stage(logger, "prepare-data", bucket=payload.bucket, prefix=payload.prefix):
+            prepare_summary = prepare_data(bucket=payload.bucket, prefix=payload.prefix, append=False)
+
+        update_status(phase="train")
+        model_path = run_dir / "model.pt"
+        with log_stage(logger, "train-prepared", model_path=str(model_path)):
+            train_prepared(
+                output_model_path=model_path,
+                train_limit=payload.train_limit,
+                epochs_override=payload.epochs_override,
+            )
+
+        update_status(phase="evaluate")
+        metrics_path = run_dir / "metrics.json"
+        with log_stage(logger, "evaluate-prepared", metrics_path=str(metrics_path)):
+            evaluate_prepared(
+                model_path=model_path,
+                output_metrics_path=metrics_path,
+                val_limit=payload.val_limit,
+                eval_query_limit=payload.eval_query_limit,
+                index_windows_override=payload.index_windows_override,
+            )
+
+        update_status(phase="build-embeddings")
+        embeddings_path = run_dir / "embeddings.npy"
+        song_ids_path = run_dir / "song_ids.npy"
+        manifest_path = run_dir / "song_manifest.json"
+        with log_stage(logger, "build-embeddings-from-prepared"):
+            build_embeddings_from_prepared(
+                model_path=model_path,
+                embeddings_out=embeddings_path,
+                song_ids_out=song_ids_path,
+                manifest_out=manifest_path,
+                train_limit=payload.train_limit,
+                val_limit=payload.val_limit,
+                test_limit=payload.test_limit,
+                index_windows_override=payload.index_windows_override,
+            )
+
+        update_status(phase="build-index")
+        index_path = run_dir / "faiss.index"
+        with log_stage(logger, "build-faiss-index"):
+            build_faiss_index(
+                embeddings_path=embeddings_path,
+                song_ids_path=song_ids_path,
+                index_out_path=index_path,
+            )
+
+        # Для experiment-run не промоутим в active автоматически
+        update_status(
+            phase="done",
+            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            progress={
+                "run_dir": str(run_dir),
+                "prepare_summary": prepare_summary,
+                "experiment_name": payload.experiment_name,
+                "train_limit": payload.train_limit,
+                "val_limit": payload.val_limit,
+                "test_limit": payload.test_limit,
+                "epochs_override": payload.epochs_override,
+                "eval_query_limit": payload.eval_query_limit,
+                "index_windows_override": payload.index_windows_override,
+                "promoted": False,
+            },
+        )
+    except Exception as exc:
+        update_status(
+            phase="failed",
+            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            last_error=str(exc),
+            progress={"run_dir": str(run_dir), "experiment_name": payload.experiment_name},
+        )
+        logger.exception("Experiment pipeline failed")
+    finally:
+        pipeline_in_progress = False
+
+
 def run_incremental_pipeline(bucket: str, prefix: str) -> None:
     global pipeline_in_progress
     if pipeline_in_progress:
@@ -165,6 +271,15 @@ async def full_run(payload: PipelineRequest, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=409, detail="Pipeline job is already running")
 
     background_tasks.add_task(run_full_pipeline, payload.bucket, payload.prefix)
+    return AsyncJobResponse(accepted=True, status="scheduled", bucket=payload.bucket, prefix=payload.prefix)
+
+
+@app.post("/pipeline/experiment-run", response_model=AsyncJobResponse)
+async def experiment_run(payload: ExperimentRunRequest, background_tasks: BackgroundTasks):
+    if pipeline_in_progress:
+        raise HTTPException(status_code=409, detail="Pipeline job is already running")
+
+    background_tasks.add_task(run_experiment_pipeline, payload)
     return AsyncJobResponse(accepted=True, status="scheduled", bucket=payload.bucket, prefix=payload.prefix)
 
 

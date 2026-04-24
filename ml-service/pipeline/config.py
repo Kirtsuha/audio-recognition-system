@@ -16,6 +16,13 @@ FAISS_INDEX_PATH = Path(os.getenv("FAISS_INDEX_PATH", str(ACTIVE_ARTIFACTS_DIR /
 SONG_MANIFEST_PATH = Path(os.getenv("SONG_MANIFEST_PATH", str(ACTIVE_ARTIFACTS_DIR / "song_manifest.json")))
 METRICS_PATH = Path(os.getenv("METRICS_PATH", str(ACTIVE_ARTIFACTS_DIR / "metrics.json")))
 
+# Evaluation artifacts
+EVAL_DIR = Path(os.getenv("EVAL_DIR", str(ARTIFACTS_DIR / "eval")))
+EVAL_QUERIES_PATH = Path(os.getenv("EVAL_QUERIES_PATH", str(EVAL_DIR / "eval_queries.jsonl")))
+EVAL_RESULTS_PATH = Path(os.getenv("EVAL_RESULTS_PATH", str(EVAL_DIR / "eval_results.jsonl")))
+EVAL_METRICS_PATH = Path(os.getenv("EVAL_METRICS_PATH", str(EVAL_DIR / "eval_metrics.json")))
+THRESHOLD_TUNING_PATH = Path(os.getenv("THRESHOLD_TUNING_PATH", str(EVAL_DIR / "threshold_tuning.json")))
+
 # Prepared dataset
 PREPARED_DATA_DIR = Path(os.getenv("PREPARED_DATA_DIR", "/app/prepared-data"))
 PREPARED_DATASET_DIR = Path(os.getenv("PREPARED_DATASET_DIR", str(PREPARED_DATA_DIR / "dataset_v1")))
@@ -25,9 +32,9 @@ INVALID_KEYS_PATH = Path(os.getenv("INVALID_KEYS_PATH", str(PREPARED_DATASET_DIR
 
 # Audio
 SR = int(os.getenv("SR", "16000"))
-SEGMENT_SECONDS = float(os.getenv("SEGMENT_SECONDS", "5.0"))
-WINDOW_HOP_SECONDS = float(os.getenv("WINDOW_HOP_SECONDS", "2.0"))
-MAX_QUERY_WINDOWS = int(os.getenv("MAX_QUERY_WINDOWS", "8"))
+SEGMENT_SECONDS = float(os.getenv("SEGMENT_SECONDS", "12.0"))
+WINDOW_HOP_SECONDS = float(os.getenv("WINDOW_HOP_SECONDS", "1.0"))
+MAX_QUERY_WINDOWS = int(os.getenv("MAX_QUERY_WINDOWS", "24"))
 
 # Mel
 N_MELS = int(os.getenv("N_MELS", "96"))
@@ -39,8 +46,8 @@ FMAX = float(os.getenv("FMAX", str(SR // 2)))
 
 # Embeddings / Index
 EMB_DIM = int(os.getenv("EMB_DIM", "128"))
-FAISS_TOP_K = int(os.getenv("FAISS_TOP_K", "8"))
-INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "12"))
+FAISS_TOP_K = int(os.getenv("FAISS_TOP_K", "15"))
+INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "24"))
 
 # Acceptance thresholds
 MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.58"))
@@ -51,6 +58,15 @@ MIN_SUPPORTED_WINDOWS = int(os.getenv("MIN_SUPPORTED_WINDOWS", "2"))
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "24"))
 NUM_WORKERS = int(os.getenv("NUM_WORKERS", "0"))
 LR = float(os.getenv("LR", "1e-3"))
-EPOCHS = int(os.getenv("EPOCHS", "10"))
+EPOCHS = int(os.getenv("EPOCHS", "5"))
 MARGIN = float(os.getenv("MARGIN", "0.30"))
 TRAIN_NEGATIVE_RETRIES = int(os.getenv("TRAIN_NEGATIVE_RETRIES", "10"))
+
+# Experiment defaults
+EXPERIMENT_RANDOM_SEED = int(os.getenv("EXPERIMENT_RANDOM_SEED", "42"))
+
+# Performance / augmentation
+FAST_AUGMENT = os.getenv("FAST_AUGMENT", "true").lower() == "true"
+CACHE_PREPARED_IN_MEMORY = os.getenv("CACHE_PREPARED_IN_MEMORY", "false").lower() == "true"
+CACHE_PREPARED_MAX_TRACKS = int(os.getenv("CACHE_PREPARED_MAX_TRACKS", "0"))
+TORCHAUDIO_MEL_DEVICE = os.getenv("TORCHAUDIO_MEL_DEVICE", "cpu")

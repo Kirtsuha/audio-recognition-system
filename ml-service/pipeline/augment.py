@@ -2,7 +2,7 @@ import random
 import numpy as np
 import librosa
 
-from pipeline.config import SR
+from pipeline.config import SR, FAST_AUGMENT
 
 
 def add_gaussian_noise(audio: np.ndarray, snr_db_min: float = 5.0, snr_db_max: float = 25.0) -> np.ndarray:
@@ -60,7 +60,13 @@ def normalize_peak(audio: np.ndarray, peak: float = 0.98) -> np.ndarray:
     return (audio / max_abs * peak).astype(np.float32)
 
 
-def augment_audio(audio: np.ndarray) -> np.ndarray:
+def augment_audio(audio: np.ndarray, fast_mode: bool = FAST_AUGMENT) -> np.ndarray:
+    """
+    fast_mode=True:
+        cheap augmentations only (noise/gain/clipping/reverb)
+    fast_mode=False:
+        full augmentations including pitch/time
+    """
     out = audio.astype(np.float32).copy()
 
     if random.random() < 0.75:
@@ -69,17 +75,18 @@ def augment_audio(audio: np.ndarray) -> np.ndarray:
     if random.random() < 0.70:
         out = add_gaussian_noise(out)
 
-    if random.random() < 0.35:
-        out = simple_reverb(out)
-
-    if random.random() < 0.25:
-        out = random_pitch_shift(out)
-
-    if random.random() < 0.25:
-        out = random_time_stretch(out)
-
     if random.random() < 0.30:
         out = random_clipping(out)
+
+    if random.random() < 0.25:
+        out = simple_reverb(out)
+
+    if not fast_mode:
+        if random.random() < 0.20:
+            out = random_pitch_shift(out)
+
+        if random.random() < 0.20:
+            out = random_time_stretch(out)
 
     out = normalize_peak(out)
     return out.astype(np.float32)

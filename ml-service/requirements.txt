@@ -1,5 +1,6 @@
 boto3
 torch
+torchaudio
 librosa
 faiss-cpu
 numpy
