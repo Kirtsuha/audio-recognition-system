@@ -32,7 +32,7 @@ INVALID_KEYS_PATH = Path(os.getenv("INVALID_KEYS_PATH", str(PREPARED_DATASET_DIR
 
 # Audio
 SR = int(os.getenv("SR", "16000"))
-SEGMENT_SECONDS = float(os.getenv("SEGMENT_SECONDS", "12.0"))
+SEGMENT_SECONDS = float(os.getenv("SEGMENT_SECONDS", "15.0"))
 WINDOW_HOP_SECONDS = float(os.getenv("WINDOW_HOP_SECONDS", "1.0"))
 MAX_QUERY_WINDOWS = int(os.getenv("MAX_QUERY_WINDOWS", "24"))
 

@@ -44,6 +44,7 @@ class ExperimentRunRequest(BaseModel):
     index_windows_override: int | None = Field(default=None, ge=1, le=256)
 
     experiment_name: str = Field(default="experiment", min_length=1, max_length=100)
+    use_full_query_audio: bool = False
 
 class EvalGenerateRequest(BaseModel):
     bucket: str = Field(..., description="S3 bucket")

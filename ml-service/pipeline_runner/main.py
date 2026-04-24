@@ -10,7 +10,7 @@ from pipeline.build_embeddings_from_prepared import build_embeddings_from_prepar
 from pipeline.build_index import build_faiss_index
 from pipeline.incremental_sync import build_incremental_run
 from pipeline.config import RUNS_DIR
-from pipeline.evaluate_prepared import evaluate_prepared
+from evaluation.evaluate_prepared import evaluate_prepared
 from pipeline.job_status import get_status, reset_progress, update_status
 from pipeline.prepare_data import prepare_data
 from pipeline.promote import promote_run_to_active
@@ -128,6 +128,7 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
             "epochs_override": payload.epochs_override,
             "eval_query_limit": payload.eval_query_limit,
             "index_windows_override": payload.index_windows_override,
+            "use_full_query_audio": payload.use_full_query_audio,
         },
     )
     reset_progress()
@@ -151,9 +152,12 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
             evaluate_prepared(
                 model_path=model_path,
                 output_metrics_path=metrics_path,
+                train_limit=payload.train_limit,
                 val_limit=payload.val_limit,
+                test_limit=payload.test_limit,
                 eval_query_limit=payload.eval_query_limit,
                 index_windows_override=payload.index_windows_override,
+                use_full_query_audio=payload.use_full_query_audio
             )
 
         update_status(phase="build-embeddings")
