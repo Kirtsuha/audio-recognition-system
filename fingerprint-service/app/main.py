@@ -1,43 +1,224 @@
-
-
-from fastapi import FastAPI, UploadFile, File, Depends
-import tempfile
+import logging
+import os
 import shutil
+import tempfile
+from pathlib import Path
 
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+import threading
+import uuid
+from datetime import datetime, timezone
+from fastapi import Query
 
 from fingerprint.matcher import match
 from repository.db import get_db
+from repository.models import Track
+from scripts.fma_to_s3_loader import upload_hf_fma_to_s3
+from scripts.s3_loader import upload_fma_zip
 from service.audio2fingerprint import fingerprint_audio
+from service.postgres_loader_pipeline import process_s3_bucket
 
 from repository.init_db import Base
 from repository.database_config import engine
-Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Music Recognition service")
+app = FastAPI(title="Fingerprint Music Recognition service")
+UPLOAD_JOBS = {}
+UPLOAD_JOBS_LOCK = threading.Lock()
+
+@app.on_event("startup")
+def init_db():
+    Base.metadata.create_all(engine)
+
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+def serialize_track(track: Track) -> dict:
+    return {
+        "track_id": track.id,
+        "title": track.title,
+        "artist": track.artist,
+        "s3_key": track.s3_key,
+    }
+
 
 @app.post("/index")
 def index_track_api(
         file: UploadFile = File(...),
         db: Session = Depends(get_db)
 ):
+    print("Recognition request started for file=%s", file.filename)
+
     with tempfile.NamedTemporaryFile(delete=False) as tmp:
         shutil.copyfileobj(file.file, tmp)
         path = tmp.name
 
-    hashes = fingerprint_audio(path)
+    try:
+        file_size = os.path.getsize(path)
+        print("Temporary audio file saved to %s (%s bytes)", path, file_size)
 
-    result = match(hashes, db)
+        hashes = fingerprint_audio(path)
+        print("Generated %s hashes for request file=%s", len(hashes), file.filename)
 
-    if not result:
-        return {"match": False}
+        result = match(hashes, db)
+
+        if not result:
+            print("No match found for file=%s", file.filename)
+            return {"match": False}
+
+        track = db.query(Track).filter(Track.id == result["track_id"]).first()
+        if track is None:
+            response = {
+                "match": True,
+                "track_id": result["track_id"],
+                "confidence": min(1.0, result["matches"] / 100)
+            }
+            print("Match found without metadata: %s", response)
+            return response
+
+        response = {
+            "match": True,
+            **serialize_track(track),
+            "confidence": min(1.0, result["matches"] / 100)
+        }
+        print("Match found for file=%s: track_id=%s", file.filename, track.id)
+        return response
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            print("Failed to remove temporary file %s", path)
+
+
+@app.get("/tracks/{track_id}")
+def get_track(track_id: int, db: Session = Depends(get_db)):
+    track = db.query(Track).filter(Track.id == track_id).first()
+    if track is None:
+        raise HTTPException(status_code=404, detail="Track not found")
+    return serialize_track(track)
+
+
+@app.post("/s3/upload-archive")
+def upload_archive_to_s3(file: UploadFile = File(...)):
+    suffix = Path(file.filename or "archive.zip").suffix.lower()
+    if suffix != ".zip":
+        raise HTTPException(status_code=400, detail="Only .zip archives are supported")
+
+    print("Received ZIP archive upload: %s", file.filename)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        archive_path = tmp.name
+
+    try:
+        summary = upload_fma_zip(archive_path)
+        print("ZIP archive upload completed: %s", summary)
+        return summary
+    finally:
+        try:
+            os.remove(archive_path)
+        except OSError:
+            print("Failed to remove temporary archive %s", archive_path)
+
+
+@app.post("/index/s3")
+def index_s3_tracks(s3_bucket: str, s3_prefix: str | None = None):
+    if s3_prefix is None:
+        s3_prefix = ""
+    print("Received request to index tracks from S3 into Postgres")
+    summary = process_s3_bucket(s3_bucket, s3_prefix)
+    print("S3 indexing request completed: %s", summary)
+    return summary
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def update_upload_job(job_id: str, payload: dict):
+    with UPLOAD_JOBS_LOCK:
+        current = UPLOAD_JOBS.get(job_id, {})
+        current.update(payload)
+        current["updated_at"] = utc_now_iso()
+        UPLOAD_JOBS[job_id] = current
+
+
+def run_hf_upload_job(job_id: str, max_files: int):
+    update_upload_job(job_id, {
+        "job_id": job_id,
+        "status": "running",
+        "max_files": max_files,
+        "started_at": utc_now_iso(),
+    })
+
+    try:
+        summary = upload_hf_fma_to_s3(
+            max_files=max_files,
+            job_id=job_id,
+            progress_callback=lambda payload: update_upload_job(job_id, payload),
+        )
+
+        update_upload_job(job_id, {
+            **summary,
+            "status": "completed",
+            "finished_at": utc_now_iso(),
+        })
+
+    except Exception as exc:
+        update_upload_job(job_id, {
+            "status": "failed",
+            "error": str(exc),
+            "finished_at": utc_now_iso(),
+        })
+
+@app.post("/s3/upload-hf/start")
+def start_hf_upload(max_files: int = Query(8000, ge=1, le=20000)):
+    job_id = str(uuid.uuid4())
+
+    with UPLOAD_JOBS_LOCK:
+        UPLOAD_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "max_files": max_files,
+            "created_at": utc_now_iso(),
+            "updated_at": utc_now_iso(),
+            "uploaded": 0,
+            "skipped": 0,
+            "failed": 0,
+            "scanned": 0,
+        }
+
+    thread = threading.Thread(
+        target=run_hf_upload_job,
+        args=(job_id, max_files),
+        daemon=True,
+    )
+    thread.start()
 
     return {
-        "match": True,
-        "track_id": result["track_id"],
-        "confidence": min(1.0, result["matches"] / 100)
+        "job_id": job_id,
+        "status": "queued",
+        "max_files": max_files,
+        "status_url": f"/s3/upload-hf/status/{job_id}",
     }
+
+
+@app.get("/s3/upload-hf/status/{job_id}")
+def get_hf_upload_status(job_id: str):
+    with UPLOAD_JOBS_LOCK:
+        job = UPLOAD_JOBS.get(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Upload job not found")
+
+    return job
+
+
+@app.get("/s3/upload-hf/status")
+def list_hf_upload_jobs():
+    with UPLOAD_JOBS_LOCK:
+        return {
+            "jobs": list(UPLOAD_JOBS.values())
+        }

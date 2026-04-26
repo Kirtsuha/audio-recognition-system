@@ -1,6 +1,7 @@
 import hashlib
 
-from config.config import FAN_VALUE
+from config.config import FAN_VALUE, MAX_DELTA_T
+
 
 def hash_triplet(f1, f2, delta_t):
     s = f"{f1}|{f2}|{delta_t}"
@@ -20,6 +21,9 @@ def generate_hashes(peaks):
             if i + j < len(peaks):
                 t2, f2 = peaks[i + j]
                 delta_t = t2 - t1
-                h = pack_hash(f1, f2, delta_t)
-                hashes.append((h, t1))
+                if 0 < delta_t <= MAX_DELTA_T:
+                    h = pack_hash(f1, f2, delta_t)
+                    hashes.append((h, t1))
+    print("peaks:", len(peaks))
+    print("hashes:", len(hashes))
     return hashes

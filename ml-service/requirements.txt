@@ -1,0 +1,12 @@
+boto3
+torch
+torchaudio
+librosa
+faiss-cpu
+numpy
+fastapi
+uvicorn
+python-multipart
+kafka-python
+soundfile
+psycopg[binary]

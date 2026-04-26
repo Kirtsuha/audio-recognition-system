@@ -8,9 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import org.springframework.http.ContentDisposition;
 
-import java.time.Instant;
 import java.time.LocalDateTime;
 
 @Entity
@@ -27,9 +25,11 @@ public class RecognitionHistory {
     private User user;
 
     private String filename;
+    private String trackId;
     private String title;
     private String artist;
     private double confidence;
+    private String source;
 
     private LocalDateTime createdAt;
 

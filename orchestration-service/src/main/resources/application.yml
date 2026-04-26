@@ -1,0 +1,37 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    consumer:
+      group-id: ${SPRING_KAFKA_CONSUMER_GROUP_ID:orchestration-service}
+      auto-offset-reset: earliest
+      properties:
+        spring.json.trusted.packages: "org.hse.musicrecognition.dto"
+    producer:
+      properties:
+        spring.json.add.type.headers: false
+    listener:
+      missing-topics-fatal: false
+
+fingerprint:
+  service:
+    url: ${FINGERPRINT_SERVICE_URL:http://fingerprint-service:8000}
+  confidence-threshold: ${FINGERPRINT_CONFIDENCE_THRESHOLD:0.75}
+
+ml:
+  timeout-ms: ${ML_TIMEOUT_MS:15000}
+  kafka:
+    request-topic: ${ML_KAFKA_REQUEST_TOPIC:ml-recognition-requests}
+    response-topic: ${ML_RESPONSE_TOPIC:ml-recognition-responses}
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION:86400000}

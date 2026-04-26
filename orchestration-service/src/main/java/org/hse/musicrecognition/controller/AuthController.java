@@ -2,6 +2,7 @@ package org.hse.musicrecognition.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.hse.musicrecognition.domain.User;
+import org.hse.musicrecognition.dto.AuthRequest;
 import org.hse.musicrecognition.repository.UserRepository;
 import org.hse.musicrecognition.service.JwtService;
 import org.springframework.security.crypto.password.PasswordEncoder;

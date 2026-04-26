@@ -1,53 +1,235 @@
-version: "3.9"
-
 services:
-
   fingerprint-db:
-    image: postgres:16
+    image: postgres:15
+    container_name: fingerprint-db
     environment:
       POSTGRES_USER: fingerprint_user
       POSTGRES_PASSWORD: fingerprint_pass
       POSTGRES_DB: fingerprint_db
-    volumes:
-      - fingerprint_data:/var/lib/postgresql/data
     ports:
-      - "5433:5432"
+      - "5432:5432"
+    volumes:
+      - fingerprint_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fingerprint_user -d fingerprint_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   orchestration-db:
-    image: postgres:16
+    image: postgres:15
+    container_name: orchestration-db
     environment:
       POSTGRES_USER: orch_user
       POSTGRES_PASSWORD: orch_pass
       POSTGRES_DB: orchestration_db
-    volumes:
-      - orchestration_data:/var/lib/postgresql/data
     ports:
-      - "5434:5432"
+      - "5433:5432"
+    volumes:
+      - orchestration_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orch_user -d orchestration_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minio minio123; do sleep 2; done &&
+      mc mb --ignore-existing local/tracks
+      "
+
+  kafka:
+    image: apache/kafka:3.7.2
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9092'"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
 
   fingerprint-service:
-    build: ./fingerprint-service
+    build:
+      context: ./fingerprint-service
     depends_on:
-      - fingerprint-db
+      fingerprint-db:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: tracks
+      S3_PREFIX: fma/
     ports:
       - "8000:8000"
 
-  orchestration-service:
-    build: ./orchestration-service
+  ml-service:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
     depends_on:
-      - orchestration-db
-      - fingerprint-service
+      kafka:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: full-tracks
+      S3_PREFIX: ""
+      TRACKS_DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ML_REQUEST_TOPIC: ml-recognition-requests
+      ML_RESPONSE_TOPIC: ml-recognition-responses
+      KAFKA_CONSUMER_GROUP: ml-service
+      ARTIFACTS_DIR: /app/artifacts
+      ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
+      RUNS_DIR: /app/artifacts/runs
+      JOB_STATUS_PATH: /app/artifacts/job_status.json
+      MODEL_PATH: /app/artifacts/active/model.pt
+      EMBEDDINGS_PATH: /app/artifacts/active/embeddings.npy
+      SONG_IDS_PATH: /app/artifacts/active/song_ids.npy
+      FAISS_INDEX_PATH: /app/artifacts/active/faiss.index
+      SONG_MANIFEST_PATH: /app/artifacts/active/song_manifest.json
+      PREPARED_DATA_DIR: /app/prepared-data
+      PREPARED_DATASET_DIR: /app/prepared-data/dataset_v1
+      PREPARED_TRACKS_DIR: /app/prepared-data/dataset_v1/tracks
+      PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
+      INVALID_KEYS_PATH: /app/prepared-data/dataset_v1/invalid_keys.json
+      METRICS_PATH: /app/artifacts/active/metrics.json
+      NUM_WORKERS: 4
+      EVAL_DIR: /app/artifacts/eval
+      EVAL_QUERIES_PATH: /app/artifacts/eval/eval_queries.jsonl
+      EVAL_RESULTS_PATH: /app/artifacts/eval/eval_results.jsonl
+      EVAL_METRICS_PATH: /app/artifacts/eval/eval_metrics.json
+      THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
+      FAST_AUGMENT: "true"
+      TORCHAUDIO_MEL_DEVICE: "cpu"
+    ports:
+      - "8010:8010"
+    volumes:
+      - ml_artifacts:/app/artifacts
+      - ml_prepared_data:/app/prepared-data
+    shm_size: "1gb"
+
+  ml-pipeline-runner:
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile.pipeline
+    depends_on:
+      fingerprint-db:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: tracks
+      S3_PREFIX: fma/
+      TRACKS_DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
+      ARTIFACTS_DIR: /app/artifacts
+      ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
+      RUNS_DIR: /app/artifacts/runs
+      JOB_STATUS_PATH: /app/artifacts/job_status.json
+      PREPARED_DATA_DIR: /app/prepared-data
+      PREPARED_DATASET_DIR: /app/prepared-data/dataset_v1
+      PREPARED_TRACKS_DIR: /app/prepared-data/dataset_v1/tracks
+      PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
+      INVALID_KEYS_PATH: /app/prepared-data/dataset_v1/invalid_keys.json
+      METRICS_PATH: /app/artifacts/active/metrics.json
+      NUM_WORKERS: 4
+      EVAL_DIR: /app/artifacts/eval
+      EVAL_QUERIES_PATH: /app/artifacts/eval/eval_queries.jsonl
+      EVAL_RESULTS_PATH: /app/artifacts/eval/eval_results.jsonl
+      EVAL_METRICS_PATH: /app/artifacts/eval/eval_metrics.json
+      THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
+      FAST_AUGMENT: "true"
+      TORCHAUDIO_MEL_DEVICE: "cpu"
+    ports:
+      - "8011:8011"
+    volumes:
+      - ml_artifacts:/app/artifacts
+      - ml_prepared_data:/app/prepared-data
+    shm_size: "1gb"
+
+  orchestration-service:
+    build:
+      context: ./orchestration-service
+    depends_on:
+      fingerprint-service:
+        condition: service_started
+      ml-service:
+        condition: service_started
+      orchestration-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://orchestration-db:5432/orchestration_db
       SPRING_DATASOURCE_USERNAME: orch_user
       SPRING_DATASOURCE_PASSWORD: orch_pass
-      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000/index
-      JWT_SECRET: supersecretkeysupersecretkeysupersecretkey
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      FINGERPRINT_CONFIDENCE_THRESHOLD: 0.75
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_KAFKA_CONSUMER_GROUP_ID: orchestration-service
+      ML_KAFKA_REQUEST_TOPIC: ml-recognition-requests
+      ML_KAFKA_RESPONSE_TOPIC: ml-recognition-responses
+      ML_TIMEOUT_MS: 15000
+      JWT_SECRET: supersecretkeysupersecretkey
       JWT_EXPIRATION: 86400000
     ports:
       - "8080:8080"
 
 volumes:
-  fingerprint_data:
-  orchestration_data:
+  fingerprint_postgres_data:
+  orchestration_postgres_data:
+  minio_data:
+  kafka_data:
+  ml_artifacts:
+  ml_prepared_data:

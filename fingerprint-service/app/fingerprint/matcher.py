@@ -3,16 +3,25 @@ from collections import defaultdict
 from repository.models import Fingerprint
 
 
-def match(hashes, db, min_matches=20):
+def chunks(lst, size):
+    for i in range(0, len(lst), size):
+        yield lst[i:i+size]
 
+def match(hashes, db, min_matches=20):
     votes = defaultdict(int)
 
-    for h, t_query in hashes:
-        h = int(h)
-        matches = db.query(Fingerprint).filter(Fingerprint.hash == h).all()
-        for m in matches:
-            delta = m.time_offset - t_query
-            votes[(m.track_id, delta)] += 1
+    hash_values = [int(h) for h, _ in hashes]
+    time_dict = {int(h): t for h, t in hashes}
+
+    results = []
+    for chunk in chunks(hash_values, 500):
+        results += db.query(Fingerprint) \
+            .filter(Fingerprint.hash.in_(chunk)) \
+            .all()
+
+    for r in results:
+        delta = r.time_offset - time_dict[r.hash]
+        votes[(r.track_id, delta)] += 1
 
     if not votes:
         return None
