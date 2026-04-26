@@ -20,7 +20,8 @@ from pipeline.config import (
     CACHE_PREPARED_IN_MEMORY,
     CACHE_PREPARED_MAX_TRACKS,
 )
-from pipeline.dataset import iter_prepared_manifest, pad_or_trim, random_segment
+from pipeline.dataset import pad_or_trim, random_segment
+from pipeline.manifest import iter_prepared_manifest
 from pipeline.to_mel import to_mel
 
 logger = logging.getLogger("ml-pipeline.train")

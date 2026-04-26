@@ -4,12 +4,17 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+import threading
+import uuid
+from datetime import datetime, timezone
+from fastapi import Query
 
 from fingerprint.matcher import match
 from repository.db import get_db
 from repository.models import Track
+from scripts.fma_to_s3_loader import upload_hf_fma_to_s3
 from scripts.s3_loader import upload_fma_zip
 from service.audio2fingerprint import fingerprint_audio
 from service.postgres_loader_pipeline import process_s3_bucket
@@ -18,7 +23,8 @@ from repository.init_db import Base
 from repository.database_config import engine
 
 app = FastAPI(title="Fingerprint Music Recognition service")
-
+UPLOAD_JOBS = {}
+UPLOAD_JOBS_LOCK = threading.Lock()
 
 @app.on_event("startup")
 def init_db():
@@ -119,8 +125,100 @@ def upload_archive_to_s3(file: UploadFile = File(...)):
 
 
 @app.post("/index/s3")
-def index_s3_tracks():
+def index_s3_tracks(s3_bucket: str, s3_prefix: str | None = None):
+    if s3_prefix is None:
+        s3_prefix = ""
     print("Received request to index tracks from S3 into Postgres")
-    summary = process_s3_bucket()
+    summary = process_s3_bucket(s3_bucket, s3_prefix)
     print("S3 indexing request completed: %s", summary)
     return summary
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def update_upload_job(job_id: str, payload: dict):
+    with UPLOAD_JOBS_LOCK:
+        current = UPLOAD_JOBS.get(job_id, {})
+        current.update(payload)
+        current["updated_at"] = utc_now_iso()
+        UPLOAD_JOBS[job_id] = current
+
+
+def run_hf_upload_job(job_id: str, max_files: int):
+    update_upload_job(job_id, {
+        "job_id": job_id,
+        "status": "running",
+        "max_files": max_files,
+        "started_at": utc_now_iso(),
+    })
+
+    try:
+        summary = upload_hf_fma_to_s3(
+            max_files=max_files,
+            job_id=job_id,
+            progress_callback=lambda payload: update_upload_job(job_id, payload),
+        )
+
+        update_upload_job(job_id, {
+            **summary,
+            "status": "completed",
+            "finished_at": utc_now_iso(),
+        })
+
+    except Exception as exc:
+        update_upload_job(job_id, {
+            "status": "failed",
+            "error": str(exc),
+            "finished_at": utc_now_iso(),
+        })
+
+@app.post("/s3/upload-hf/start")
+def start_hf_upload(max_files: int = Query(8000, ge=1, le=20000)):
+    job_id = str(uuid.uuid4())
+
+    with UPLOAD_JOBS_LOCK:
+        UPLOAD_JOBS[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "max_files": max_files,
+            "created_at": utc_now_iso(),
+            "updated_at": utc_now_iso(),
+            "uploaded": 0,
+            "skipped": 0,
+            "failed": 0,
+            "scanned": 0,
+        }
+
+    thread = threading.Thread(
+        target=run_hf_upload_job,
+        args=(job_id, max_files),
+        daemon=True,
+    )
+    thread.start()
+
+    return {
+        "job_id": job_id,
+        "status": "queued",
+        "max_files": max_files,
+        "status_url": f"/s3/upload-hf/status/{job_id}",
+    }
+
+
+@app.get("/s3/upload-hf/status/{job_id}")
+def get_hf_upload_status(job_id: str):
+    with UPLOAD_JOBS_LOCK:
+        job = UPLOAD_JOBS.get(job_id)
+
+    if job is None:
+        raise HTTPException(status_code=404, detail="Upload job not found")
+
+    return job
+
+
+@app.get("/s3/upload-hf/status")
+def list_hf_upload_jobs():
+    with UPLOAD_JOBS_LOCK:
+        return {
+            "jobs": list(UPLOAD_JOBS.values())
+        }

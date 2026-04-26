@@ -13,3 +13,6 @@ dotenv
 pytest
 httpx
 soundfile
+datasets
+torch
+torchcodec

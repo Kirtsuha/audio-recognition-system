@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
 from app.logging_utils import configure_logging, log_stage
-from app.schemas import AsyncJobResponse, PipelineRequest, ExperimentRunRequest
+from pipeline_runner.schemas import AsyncJobResponse, PipelineRequest, ExperimentRunRequest
 from pipeline.build_embeddings_from_prepared import build_embeddings_from_prepared
 from pipeline.build_index import build_faiss_index
 from pipeline.incremental_sync import build_incremental_run
@@ -135,7 +135,17 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
 
     try:
         with log_stage(logger, "prepare-data", bucket=payload.bucket, prefix=payload.prefix):
-            prepare_summary = prepare_data(bucket=payload.bucket, prefix=payload.prefix, append=False)
+            if payload.skip_prepare:
+                prepare_summary = {"skipped": True}
+                logger.info("Prepare-data skipped by request")
+            else:
+                with log_stage(logger, "prepare-data", bucket=payload.bucket, prefix=payload.prefix):
+                    prepare_summary = prepare_data(
+                        bucket=payload.bucket,
+                        prefix=payload.prefix,
+                        append=False,
+                        prepare_limit=payload.prepare_limit,
+                    )
 
         update_status(phase="train")
         model_path = run_dir / "model.pt"
@@ -201,6 +211,8 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
                 "eval_query_limit": payload.eval_query_limit,
                 "index_windows_override": payload.index_windows_override,
                 "promoted": False,
+                "prepare_limit": payload.prepare_limit,
+                "skip_prepare": payload.skip_prepare,
             },
         )
     except Exception as exc:

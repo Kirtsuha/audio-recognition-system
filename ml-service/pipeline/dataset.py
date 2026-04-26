@@ -1,20 +1,11 @@
 import hashlib
-import json
 import random
-from pathlib import Path
 from typing import List
 
 import librosa
 import numpy as np
 
-from pipeline.config import (
-    SR,
-    SEGMENT_SECONDS,
-    WINDOW_HOP_SECONDS,
-    MAX_QUERY_WINDOWS,
-    PREPARED_MANIFEST_PATH,
-)
-from pipeline.experiment_utils import apply_split_limits
+from pipeline.config import SR, SEGMENT_SECONDS, WINDOW_HOP_SECONDS, MAX_QUERY_WINDOWS
 
 
 def load_audio(path: str) -> np.ndarray:
@@ -48,10 +39,8 @@ def random_segment(audio: np.ndarray, target_len: int | None = None) -> np.ndarr
     if len(audio) <= target_len:
         return pad_or_trim(audio, target_len)
 
-    max_start = len(audio) - target_len
-    start = random.randint(0, max_start)
-    end = start + target_len
-    return audio[start:end].astype(np.float32)
+    start = random.randint(0, len(audio) - target_len)
+    return audio[start:start + target_len].astype(np.float32)
 
 
 def extract_sliding_windows(
@@ -67,8 +56,6 @@ def extract_sliding_windows(
         return [pad_or_trim(audio, window_len)]
 
     starts = list(range(0, len(audio) - window_len + 1, hop_len))
-    if not starts:
-        return [pad_or_trim(audio, window_len)]
 
     if len(starts) > max_windows:
         chosen = np.linspace(0, len(starts) - 1, max_windows).astype(int)
@@ -77,7 +64,11 @@ def extract_sliding_windows(
     return [audio[s:s + window_len].astype(np.float32) for s in starts]
 
 
-def extract_uniform_index_windows(audio: np.ndarray, n_windows: int, window_seconds: float = SEGMENT_SECONDS) -> List[np.ndarray]:
+def extract_uniform_index_windows(
+    audio: np.ndarray,
+    n_windows: int,
+    window_seconds: float = SEGMENT_SECONDS,
+) -> List[np.ndarray]:
     window_len = int(window_seconds * SR)
 
     if len(audio) <= window_len:
@@ -98,31 +89,3 @@ def assign_split(track_id: int) -> str:
     if bucket < 90:
         return "val"
     return "test"
-
-
-def iter_prepared_manifest(path: Path = PREPARED_MANIFEST_PATH):
-    if not path.exists():
-        return
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                yield json.loads(line)
-
-
-def load_prepared_manifest(
-    train_limit: int = 0,
-    val_limit: int = 0,
-    test_limit: int = 0,
-    path: Path = PREPARED_MANIFEST_PATH,
-) -> list[dict]:
-    rows = list(iter_prepared_manifest(path=path))
-    if not rows:
-        return []
-
-    return apply_split_limits(
-        rows,
-        train_limit=train_limit,
-        val_limit=val_limit,
-        test_limit=test_limit,
-    )

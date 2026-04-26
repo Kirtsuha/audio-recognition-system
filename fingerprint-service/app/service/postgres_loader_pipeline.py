@@ -74,7 +74,7 @@ def upload_track_to_db(db: Session, track_id: int, s3_key: str) -> Track:
     return track
 
 
-def process_s3_track(s3_key: str, db: Session) -> dict:
+def process_s3_track(s3_key: str, db: Session, s3_bucket: str, s3_prefix: str) -> dict:
     if not is_audio_file(s3_key):
         logger.info("Skipping non-audio object: %s", s3_key)
         return {"status": "ignored", "s3_key": s3_key}
@@ -86,7 +86,7 @@ def process_s3_track(s3_key: str, db: Session) -> dict:
         return {"status": "skipped", "track_id": track_id, "s3_key": s3_key}
 
     logger.info("Downloading track %s from S3 key %s", track_id, s3_key)
-    obj = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
+    obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
     audio_stream = BytesIO(obj["Body"].read())
 
     with tempfile.NamedTemporaryFile(delete=True) as tmp:
@@ -111,7 +111,7 @@ def process_s3_track(s3_key: str, db: Session) -> dict:
     return {"status": "indexed", "track_id": track_id, "s3_key": s3_key, "hashes": len(hashes)}
 
 
-def process_s3_bucket() -> dict:
+def process_s3_bucket(s3_bucket: str, s3_prefix: str) -> dict:
     stats = {
         "indexed": 0,
         "skipped": 0,
@@ -125,13 +125,13 @@ def process_s3_bucket() -> dict:
     try:
         paginator = s3.get_paginator("list_objects_v2")
 
-        for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=S3_PREFIX):
+        for page in paginator.paginate(Bucket=s3_bucket, Prefix=s3_prefix):
             for obj in page.get("Contents", []):
                 key = obj["Key"]
                 stats["processed_keys"] += 1
 
                 try:
-                    result = process_s3_track(key, db)
+                    result = process_s3_track(key, db, s3_bucket, s3_prefix)
                     status = result["status"]
 
                     if status == "indexed":
@@ -142,8 +142,9 @@ def process_s3_bucket() -> dict:
                         stats["ignored"] += 1
 
                 except Exception as e:
+                    db.rollback()
                     stats["failed"] += 1
-                    print("Failed to process %s: %s", key, e)
+                    print(f"Failed to process {key}: {e}")
 
         return stats
 

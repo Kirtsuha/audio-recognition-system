@@ -1,6 +1,5 @@
 import json
 import logging
-import random
 import time
 from pathlib import Path
 
@@ -20,11 +19,10 @@ from pipeline.config import (
 from pipeline.dataset import (
     extract_sliding_windows,
     extract_uniform_index_windows,
-    iter_prepared_manifest,
-    load_prepared_manifest,
     pad_or_trim,
     random_segment,
 )
+from pipeline.manifest import iter_prepared_manifest, load_prepared_manifest
 from pipeline.to_mel import to_mel
 
 logger = logging.getLogger("ml-pipeline.evaluate")
