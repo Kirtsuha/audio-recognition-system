@@ -1,0 +1,16 @@
+[run]
+omit =
+    */pipeline/train.py
+    */pipeline/train_prepared.py
+    */pipeline/embed.py
+    */pipeline/build_embeddings_from_prepared.py
+    */pipeline/prepare_data.py
+    */pipeline/incremental_sync.py
+    */evaluation/eval_dataset.py
+    */evaluation/eval_runner.py
+    */evaluation/evaluate_prepared.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:

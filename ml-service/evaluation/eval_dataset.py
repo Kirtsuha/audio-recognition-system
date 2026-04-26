@@ -15,7 +15,7 @@ from pipeline.augment import (
     simple_reverb,
 )
 from pipeline.config import EVAL_QUERIES_PATH, SR
-from pipeline.dataset import iter_prepared_manifest
+from pipeline.manifest import iter_prepared_manifest
 from evaluation.eval_utils import write_jsonl
 
 logger = logging.getLogger("ml-pipeline.eval-dataset")
