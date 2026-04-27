@@ -1,6 +1,14 @@
 import numpy as np
 
+
 def normalize(audio):
-    if np.max(audio) > 1:
-        audio = audio/np.max(audio)
+    audio = np.asarray(audio, dtype=np.float32)
+
+    if audio.size == 0:
+        return audio
+
+    peak = float(np.max(np.abs(audio)))
+    if peak > 0:
+        audio = audio / peak
+
     return audio

@@ -1,29 +1,40 @@
-import hashlib
+from collections import defaultdict
 
-from config.config import FAN_VALUE, MAX_DELTA_T
+from config.config import FAN_VALUE, MIN_DELTA_T, MAX_DELTA_T
 
-
-def hash_triplet(f1, f2, delta_t):
-    s = f"{f1}|{f2}|{delta_t}"
-    return int(hashlib.sha256(s.encode()).hexdigest(), 16)
 
 def pack_hash(f1: int, f2: int, delta_t: int) -> int:
-    return (f1 << 23) | (f2 << 24) | (delta_t)
+    return ((int(f1) & 0xFFF) << 20) | ((int(f2) & 0xFFF) << 8) | (int(delta_t) & 0xFF)
 
 
 def generate_hashes(peaks):
-    peaks = sorted(peaks, key=lambda x: x[0])
+    peaks = sorted(peaks, key=lambda x: (x[0], x[1]))
+
+    by_time = defaultdict(list)
+    for t, f in peaks:
+        by_time[int(t)].append(int(f))
+
+    times = sorted(by_time.keys())
     hashes = []
 
-    for i in range(len(peaks)):
-        t1, f1 = peaks[i]
-        for j in range(1, FAN_VALUE):
-            if i + j < len(peaks):
-                t2, f2 = peaks[i + j]
-                delta_t = t2 - t1
-                if 0 < delta_t <= MAX_DELTA_T:
-                    h = pack_hash(f1, f2, delta_t)
-                    hashes.append((h, t1))
-    print("peaks:", len(peaks))
-    print("hashes:", len(hashes))
+    for t1 in times:
+        anchors = by_time[t1]
+
+        future = []
+        for t2 in times:
+            dt = t2 - t1
+            if dt < MIN_DELTA_T:
+                continue
+            if dt > MAX_DELTA_T:
+                break
+
+            for f2 in by_time[t2]:
+                future.append((dt, f2))
+
+        future = future[:FAN_VALUE]
+
+        for f1 in anchors:
+            for dt, f2 in future:
+                hashes.append((pack_hash(f1, f2, dt), t1))
+
     return hashes

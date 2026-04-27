@@ -16,6 +16,7 @@ from pipeline.augment import (
 )
 from pipeline.config import EVAL_QUERIES_PATH, SR
 from pipeline.manifest import iter_prepared_manifest
+from pipeline.config import EVAL_DIR
 from evaluation.eval_utils import write_jsonl
 
 logger = logging.getLogger("ml-pipeline.eval-dataset")
@@ -66,13 +67,24 @@ def _apply_corruption(audio: np.ndarray, corruption: str) -> np.ndarray:
     return normalize_peak(out)
 
 
-def _save_query_audio(audio: np.ndarray, query_id: str) -> str:
-    tmp = tempfile.NamedTemporaryFile(prefix=f"{query_id}_", suffix=".wav", delete=False)
-    tmp_path = tmp.name
-    tmp.close()
+def _safe_filename(value: str) -> str:
+    return (
+        value.replace("/", "_")
+        .replace("\\", "_")
+        .replace(":", "_")
+        .replace(" ", "_")
+    )
 
-    sf.write(tmp_path, audio.astype(np.float32), SR)
-    return tmp_path
+
+def _save_query_audio(audio: np.ndarray, query_id: str) -> str:
+    queries_dir = EVAL_DIR / "queries"
+    queries_dir.mkdir(parents=True, exist_ok=True)
+
+    query_path = queries_dir / f"{_safe_filename(query_id)}.wav"
+
+    sf.write(str(query_path), audio.astype(np.float32), SR)
+
+    return str(query_path)
 
 
 def generate_eval_dataset(

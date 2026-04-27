@@ -24,7 +24,21 @@ AUDIO_EXT = (".mp3", ".wav", ".flac", ".ogg")
 FMA_METADATA_CSV = Path(__file__).resolve().parent.parent / "data" / "tracks.csv"
 
 s3 = get_s3()
-df_tracks = pd.read_csv(FMA_METADATA_CSV, index_col=0, low_memory=False)
+df_tracks = None
+
+
+def get_tracks_metadata():
+    global df_tracks
+
+    if df_tracks is not None:
+        return df_tracks
+
+    if not FMA_METADATA_CSV.exists():
+        df_tracks = pd.DataFrame()
+        return df_tracks
+
+    df_tracks = pd.read_csv(FMA_METADATA_CSV, index_col=0, low_memory=False)
+    return df_tracks
 
 
 def is_audio_file(path: str) -> bool:
@@ -48,13 +62,15 @@ def upload_track_to_db(db: Session, track_id: int, s3_key: str) -> Track:
     default_title = path.stem
     default_artist = path.parent.name if path.parent.name else "unknown"
 
+    metadata = get_tracks_metadata()
+
     try:
-        title = df_tracks.loc[track_id, ("track", "title")]
+        title = metadata.loc[track_id, ("track", "title")]
     except Exception:
         title = default_title
 
     try:
-        artist = df_tracks.loc[track_id, ("artist", "name")]
+        artist = metadata.loc[track_id, ("artist", "name")]
     except Exception:
         artist = default_artist
 

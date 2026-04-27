@@ -104,6 +104,7 @@ services:
       S3_SECRET_KEY: minio123
       S3_BUCKET: tracks
       S3_PREFIX: fma/
+      HF_TOKEN: ${HF_TOKEN}
     ports:
       - "8000:8000"
 
@@ -112,6 +113,8 @@ services:
       context: ./ml-service
       dockerfile: Dockerfile
     depends_on:
+      fingerprint-service:
+        condition: service_started
       kafka:
         condition: service_healthy
       minio-init:
@@ -150,6 +153,9 @@ services:
       THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
       FAST_AUGMENT: "true"
       TORCHAUDIO_MEL_DEVICE: "cpu"
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      COMBINED_RESULTS_PATH: /app/artifacts/eval/combined_eval_results.jsonl
+      COMBINED_METRICS_PATH: /app/artifacts/eval/combined_eval_metrics.json
     ports:
       - "8010:8010"
     volumes:
@@ -198,6 +204,35 @@ services:
       - ml_prepared_data:/app/prepared-data
     shm_size: "1gb"
 
+  evaluation-service:
+    build:
+      context: ./evaluation-service
+    depends_on:
+      fingerprint-service:
+        condition: service_started
+      ml-service:
+        condition: service_started
+    environment:
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      ML_SERVICE_URL: http://ml-service:8010
+
+      PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
+
+      EVAL_DIR: /app/eval
+      EVAL_QUERIES_DIR: /app/eval/queries
+      EVAL_QUERIES_PATH: /app/eval/eval_queries.jsonl
+      FINGERPRINT_RESULTS_PATH: /app/eval/fingerprint_results.jsonl
+      ML_RESULTS_PATH: /app/eval/ml_results.jsonl
+      COMBINED_RESULTS_PATH: /app/eval/combined_results.jsonl
+      METRICS_PATH: /app/eval/metrics.json
+
+      EVAL_SR: 16000
+    ports:
+      - "8020:8020"
+    volumes:
+      - ml_prepared_data:/app/prepared-data
+      - eval_artifacts:/app/eval
+
   orchestration-service:
     build:
       context: ./orchestration-service
@@ -233,3 +268,4 @@ volumes:
   kafka_data:
   ml_artifacts:
   ml_prepared_data:
+  eval_artifacts:

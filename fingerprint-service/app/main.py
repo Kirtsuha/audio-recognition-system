@@ -45,52 +45,60 @@ def serialize_track(track: Track) -> dict:
     }
 
 
-@app.post("/index")
-def index_track_api(
-        file: UploadFile = File(...),
-        db: Session = Depends(get_db)
-):
-    print("Recognition request started for file=%s", file.filename)
-
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+def recognize_file(file: UploadFile, db: Session) -> dict:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename or "query.wav").suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         path = tmp.name
 
     try:
-        file_size = os.path.getsize(path)
-        print("Temporary audio file saved to %s (%s bytes)", path, file_size)
-
         hashes = fingerprint_audio(path)
-        print("Generated %s hashes for request file=%s", len(hashes), file.filename)
-
         result = match(hashes, db)
 
-        if not result:
-            print("No match found for file=%s", file.filename)
-            return {"match": False}
+        if not result.get("matched"):
+            return {
+                "match": False,
+                "confidence": result.get("confidence", 0.0),
+                "reason": result.get("reason"),
+                "source": "fingerprint",
+                "debug": result,
+            }
 
         track = db.query(Track).filter(Track.id == result["track_id"]).first()
-        if track is None:
-            response = {
-                "match": True,
-                "track_id": result["track_id"],
-                "confidence": min(1.0, result["matches"] / 100)
-            }
-            print("Match found without metadata: %s", response)
-            return response
 
         response = {
             "match": True,
-            **serialize_track(track),
-            "confidence": min(1.0, result["matches"] / 100)
+            "track_id": result["track_id"],
+            "confidence": result["confidence"],
+            "source": "fingerprint",
+            "debug": result,
         }
-        print("Match found for file=%s: track_id=%s", file.filename, track.id)
+
+        if track is not None:
+            response.update(serialize_track(track))
+
         return response
+
     finally:
         try:
             os.remove(path)
         except OSError:
-            print("Failed to remove temporary file %s", path)
+            pass
+
+
+@app.post("/recognize")
+def recognize_api(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    return recognize_file(file, db)
+
+
+@app.post("/index")
+def legacy_index_alias(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    return recognize_file(file, db)
 
 
 @app.get("/tracks/{track_id}")

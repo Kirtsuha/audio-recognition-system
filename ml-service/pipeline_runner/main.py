@@ -2,7 +2,7 @@ import logging
 import time
 from pathlib import Path
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 
 from app.logging_utils import configure_logging, log_stage
 from pipeline_runner.schemas import (
@@ -23,10 +23,12 @@ from pipeline.prepare_data import prepare_data
 from pipeline.promote import promote_run_to_active
 from pipeline.train_prepared import train_prepared
 
-from evaluation.eval_dataset import generate_eval_dataset
-from evaluation.eval_runner import run_evaluation
-from evaluation.eval_metrics import build_eval_metrics
-from evaluation.threshold_tuning import tune_thresholds
+# from evaluation.eval_dataset import generate_eval_dataset
+# from evaluation.eval_runner import run_evaluation
+# from evaluation.eval_metrics import build_eval_metrics
+# from evaluation.threshold_tuning import tune_thresholds
+# from evaluation.combined_eval_runner import run_combined_evaluation
+# from evaluation.combined_eval_metrics import build_combined_eval_metrics
 
 app = FastAPI(title="ML Pipeline Runner")
 configure_logging()
@@ -41,134 +43,134 @@ def make_run_dir(prefix: str) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
-def run_generate_eval_dataset(payload: EvalGenerateRequest) -> None:
-    global pipeline_in_progress
-    if pipeline_in_progress:
-        return
-
-    pipeline_in_progress = True
-    update_status(
-        current_job="generate-eval-dataset",
-        phase="generate",
-        started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        finished_at=None,
-        last_error=None,
-        progress={},
-    )
-    reset_progress()
-
-    try:
-        with log_stage(logger, "generate-eval-dataset"):
-            summary = generate_eval_dataset(
-                per_track_clean_queries=payload.per_track_clean_queries,
-                per_track_noisy_queries=payload.per_track_noisy_queries,
-                durations_sec=payload.durations_sec,
-            )
-
-        update_status(
-            phase="done",
-            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            progress={"summary": summary},
-        )
-    except Exception as exc:
-        update_status(
-            phase="failed",
-            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            last_error=str(exc),
-        )
-        logger.exception("Eval dataset generation failed")
-    finally:
-        pipeline_in_progress = False
-
-
-def run_eval_pipeline(payload: EvalRunRequest) -> None:
-    global pipeline_in_progress
-    if pipeline_in_progress:
-        return
-
-    pipeline_in_progress = True
-    update_status(
-        current_job="run-eval",
-        phase="run",
-        started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        finished_at=None,
-        last_error=None,
-        progress={},
-    )
-    reset_progress()
-
-    try:
-        with log_stage(logger, "run-eval"):
-            run_summary = run_evaluation(
-                warmup_queries=payload.warmup_queries,
-                limit=payload.limit,
-            )
-
-        update_status(phase="metrics")
-
-        with log_stage(logger, "build-eval-metrics"):
-            metrics_summary = build_eval_metrics()
-
-        update_status(
-            phase="done",
-            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            progress={
-                "run_summary": run_summary,
-                "metrics_summary": metrics_summary,
-            },
-        )
-    except Exception as exc:
-        update_status(
-            phase="failed",
-            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            last_error=str(exc),
-        )
-        logger.exception("Eval pipeline failed")
-    finally:
-        pipeline_in_progress = False
+# def run_generate_eval_dataset(payload: EvalGenerateRequest) -> None:
+#     global pipeline_in_progress
+#     if pipeline_in_progress:
+#         return
+#
+#     pipeline_in_progress = True
+#     update_status(
+#         current_job="generate-eval-dataset",
+#         phase="generate",
+#         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#         finished_at=None,
+#         last_error=None,
+#         progress={},
+#     )
+#     reset_progress()
+#
+#     try:
+#         with log_stage(logger, "generate-eval-dataset"):
+#             summary = generate_eval_dataset(
+#                 per_track_clean_queries=payload.per_track_clean_queries,
+#                 per_track_noisy_queries=payload.per_track_noisy_queries,
+#                 durations_sec=payload.durations_sec,
+#             )
+#
+#         update_status(
+#             phase="done",
+#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#             last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#             progress={"summary": summary},
+#         )
+#     except Exception as exc:
+#         update_status(
+#             phase="failed",
+#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#             last_error=str(exc),
+#         )
+#         logger.exception("Eval dataset generation failed")
+#     finally:
+#         pipeline_in_progress = False
 
 
-def run_threshold_tuning(payload: ThresholdTuneRequest) -> None:
-    global pipeline_in_progress
-    if pipeline_in_progress:
-        return
-
-    pipeline_in_progress = True
-    update_status(
-        current_job="tune-thresholds",
-        phase="tune",
-        started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        finished_at=None,
-        last_error=None,
-        progress={},
-    )
-    reset_progress()
-
-    try:
-        with log_stage(logger, "tune-thresholds"):
-            summary = tune_thresholds(
-                confidence_values=payload.confidence_values,
-                margin_values=payload.margin_values,
-                support_values=payload.support_values,
-            )
-
-        update_status(
-            phase="done",
-            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            progress={"summary": summary},
-        )
-    except Exception as exc:
-        update_status(
-            phase="failed",
-            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            last_error=str(exc),
-        )
-        logger.exception("Threshold tuning failed")
-    finally:
-        pipeline_in_progress = False
+# def run_eval_pipeline(payload: EvalRunRequest) -> None:
+#     global pipeline_in_progress
+#     if pipeline_in_progress:
+#         return
+#
+#     pipeline_in_progress = True
+#     update_status(
+#         current_job="run-eval",
+#         phase="run",
+#         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#         finished_at=None,
+#         last_error=None,
+#         progress={},
+#     )
+#     reset_progress()
+#
+#     try:
+#         with log_stage(logger, "run-eval"):
+#             run_summary = run_evaluation(
+#                 warmup_queries=payload.warmup_queries,
+#                 limit=payload.limit,
+#             )
+#
+#         update_status(phase="metrics")
+#
+#         with log_stage(logger, "build-eval-metrics"):
+#             metrics_summary = build_eval_metrics()
+#
+#         update_status(
+#             phase="done",
+#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#             last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#             progress={
+#                 "run_summary": run_summary,
+#                 "metrics_summary": metrics_summary,
+#             },
+#         )
+#     except Exception as exc:
+#         update_status(
+#             phase="failed",
+#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#             last_error=str(exc),
+#         )
+#         logger.exception("Eval pipeline failed")
+#     finally:
+#         pipeline_in_progress = False
+#
+#
+# def run_threshold_tuning(payload: ThresholdTuneRequest) -> None:
+#     global pipeline_in_progress
+#     if pipeline_in_progress:
+#         return
+#
+#     pipeline_in_progress = True
+#     update_status(
+#         current_job="tune-thresholds",
+#         phase="tune",
+#         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#         finished_at=None,
+#         last_error=None,
+#         progress={},
+#     )
+#     reset_progress()
+#
+#     try:
+#         with log_stage(logger, "tune-thresholds"):
+#             summary = tune_thresholds(
+#                 confidence_values=payload.confidence_values,
+#                 margin_values=payload.margin_values,
+#                 support_values=payload.support_values,
+#             )
+#
+#         update_status(
+#             phase="done",
+#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#             last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#             progress={"summary": summary},
+#         )
+#     except Exception as exc:
+#         update_status(
+#             phase="failed",
+#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+#             last_error=str(exc),
+#         )
+#         logger.exception("Threshold tuning failed")
+#     finally:
+#         pipeline_in_progress = False
 
 def run_full_pipeline(bucket: str, prefix: str) -> None:
     global pipeline_in_progress
@@ -456,31 +458,63 @@ async def pipeline_status():
     }
 
 
-@app.post("/evaluation/generate-set", response_model=AsyncJobResponse)
-async def evaluation_generate_set(payload: EvalGenerateRequest, background_tasks: BackgroundTasks):
-    if pipeline_in_progress:
-        raise HTTPException(status_code=409, detail="Pipeline job is already running")
+# @app.post("/evaluation/generate-set", response_model=AsyncJobResponse)
+# async def evaluation_generate_set(payload: EvalGenerateRequest, background_tasks: BackgroundTasks):
+#     if pipeline_in_progress:
+#         raise HTTPException(status_code=409, detail="Pipeline job is already running")
+#
+#     background_tasks.add_task(run_generate_eval_dataset, payload)
+#     return AsyncJobResponse(accepted=True, status="scheduled", bucket="", prefix="")
+#
+#
+# @app.post("/evaluation/run", response_model=AsyncJobResponse)
+# async def evaluation_run(payload: EvalRunRequest, background_tasks: BackgroundTasks):
+#     if pipeline_in_progress:
+#         raise HTTPException(status_code=409, detail="Pipeline job is already running")
+#
+#     background_tasks.add_task(run_eval_pipeline, payload)
+#     return AsyncJobResponse(accepted=True, status="scheduled", bucket="", prefix="")
 
-    background_tasks.add_task(run_generate_eval_dataset, payload)
-    return AsyncJobResponse(accepted=True, status="scheduled", bucket="", prefix="")
-
-
-@app.post("/evaluation/run", response_model=AsyncJobResponse)
-async def evaluation_run(payload: EvalRunRequest, background_tasks: BackgroundTasks):
-    if pipeline_in_progress:
-        raise HTTPException(status_code=409, detail="Pipeline job is already running")
-
-    background_tasks.add_task(run_eval_pipeline, payload)
-    return AsyncJobResponse(accepted=True, status="scheduled", bucket="", prefix="")
-
-
-@app.post("/evaluation/tune-thresholds", response_model=AsyncJobResponse)
-async def evaluation_tune_thresholds(payload: ThresholdTuneRequest, background_tasks: BackgroundTasks):
-    if pipeline_in_progress:
-        raise HTTPException(status_code=409, detail="Pipeline job is already running")
-
-    background_tasks.add_task(run_threshold_tuning, payload)
-    return AsyncJobResponse(accepted=True, status="scheduled", bucket="", prefix="")
+# @app.post("/evaluation/combined/run")
+# def combined_eval_run_endpoint(
+#     limit: int | None = Query(default=None, ge=1),
+#     fingerprint_timeout_sec: float = Query(default=60.0, ge=1.0),
+# ):
+#     return run_combined_evaluation(
+#         limit=limit,
+#         fingerprint_timeout_sec=fingerprint_timeout_sec,
+#     )
+#
+#
+# @app.post("/evaluation/combined/metrics")
+# def combined_eval_metrics_endpoint():
+#     return build_combined_eval_metrics()
+#
+#
+# @app.post("/evaluation/combined/run-all")
+# def combined_eval_run_all_endpoint(
+#     limit: int | None = Query(default=None, ge=1),
+#     fingerprint_timeout_sec: float = Query(default=60.0, ge=1.0),
+# ):
+#     run_summary = run_combined_evaluation(
+#         limit=limit,
+#         fingerprint_timeout_sec=fingerprint_timeout_sec,
+#     )
+#
+#     metrics = build_combined_eval_metrics()
+#
+#     return {
+#         "run": run_summary,
+#         "metrics": metrics,
+#     }
+#
+# @app.post("/evaluation/tune-thresholds", response_model=AsyncJobResponse)
+# async def evaluation_tune_thresholds(payload: ThresholdTuneRequest, background_tasks: BackgroundTasks):
+#     if pipeline_in_progress:
+#         raise HTTPException(status_code=409, detail="Pipeline job is already running")
+#
+#     background_tasks.add_task(run_threshold_tuning, payload)
+#     return AsyncJobResponse(accepted=True, status="scheduled", bucket="", prefix="")
 
 @app.get("/health")
 async def health():
