@@ -42,5 +42,19 @@ PREPARED_MANIFEST_PATH = Path(
 )
 
 SR = int(os.getenv("EVAL_SR", "16000"))
-
 DEFAULT_DURATIONS_SEC = [5.0, 10.0, 15.0]
+
+S3_ENDPOINT = os.getenv("S3_ENDPOINT", "http://minio:9000")
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "minio")
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "minio123")
+S3_BUCKET = os.getenv("S3_BUCKET", "tracks")
+
+S3_PREFIX_CANDIDATES = [
+    x.strip()
+    for x in os.getenv("S3_PREFIX_CANDIDATES", ",fma/").split(",")
+]
+
+EVAL_AUDIO_SOURCE = os.getenv("EVAL_AUDIO_SOURCE", "s3").lower() # TODO switch to S3
+
+DATASET_PROGRESS_EVERY = int(os.getenv("DATASET_PROGRESS_EVERY", "25"))
+RUNNER_PROGRESS_EVERY = int(os.getenv("RUNNER_PROGRESS_EVERY", "25"))

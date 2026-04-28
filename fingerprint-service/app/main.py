@@ -18,13 +18,16 @@ from scripts.fma_to_s3_loader import upload_hf_fma_to_s3
 from scripts.s3_loader import upload_fma_zip
 from service.audio2fingerprint import fingerprint_audio
 from service.postgres_loader_pipeline import process_s3_bucket
-
+from logging_utils import configure_logging
 from repository.init_db import Base
 from repository.database_config import engine
 
 app = FastAPI(title="Fingerprint Music Recognition service")
 UPLOAD_JOBS = {}
 UPLOAD_JOBS_LOCK = threading.Lock()
+
+configure_logging()
+logger = logging.getLogger("fingerprint-service")
 
 @app.on_event("startup")
 def init_db():

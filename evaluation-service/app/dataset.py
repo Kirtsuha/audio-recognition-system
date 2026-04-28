@@ -1,12 +1,29 @@
+import logging
 import random
-from pathlib import Path
+import time
 
 import numpy as np
 import soundfile as sf
 
-from app.audio import apply_corruption, cut_random_segment, load_prepared_audio, normalize_peak
-from app.config import EVAL_QUERIES_DIR, EVAL_QUERIES_PATH, PREPARED_MANIFEST_PATH, SR
+from app.audio import (
+    apply_corruption,
+    cut_random_segment,
+    load_prepared_audio,
+    load_s3_audio,
+    normalize_peak,
+)
+from app.config import (
+    DATASET_PROGRESS_EVERY,
+    EVAL_AUDIO_SOURCE,
+    EVAL_QUERIES_DIR,
+    EVAL_QUERIES_PATH,
+    PREPARED_MANIFEST_PATH,
+    SR,
+)
+from app.logging_utils import log_stage
 from app.utils import read_jsonl, write_jsonl
+
+logger = logging.getLogger("evaluation.dataset")
 
 
 NOISY_BUCKETS = [
@@ -38,6 +55,19 @@ def _save_query_audio(audio: np.ndarray, query_id: str) -> str:
     return str(path)
 
 
+def _load_eval_audio(item: dict) -> tuple[np.ndarray, str]:
+    if EVAL_AUDIO_SOURCE == "s3":
+        s3_key = item.get("s3_key")
+        if not s3_key:
+            raise ValueError(f"Manifest item has no s3_key: {item}")
+        return load_s3_audio(s3_key), "s3"
+
+    if EVAL_AUDIO_SOURCE == "prepared":
+        return load_prepared_audio(item["prepared_path"]), "prepared"
+
+    raise ValueError(f"Unsupported EVAL_AUDIO_SOURCE: {EVAL_AUDIO_SOURCE}")
+
+
 def _load_test_items(test_limit: int | None = None) -> list[dict]:
     rows = read_jsonl(PREPARED_MANIFEST_PATH)
     rows = [x for x in rows if x.get("split") == "test"]
@@ -58,109 +88,191 @@ def generate_eval_dataset(
     test_limit: int | None = None,
     negative_limit: int = 200,
 ) -> dict:
-    items = _load_test_items(test_limit)
+    started = time.perf_counter()
 
-    rows = []
+    with log_stage(
+        logger,
+        "generate-eval-dataset",
+        audio_source=EVAL_AUDIO_SOURCE,
+        test_limit=test_limit,
+        negative_limit=negative_limit,
+        clean_per_track=per_track_clean_queries,
+        noisy_per_track=per_track_noisy_queries,
+        durations=durations_sec,
+    ):
+        items = _load_test_items(test_limit)
 
-    for item_idx, item in enumerate(items, start=1):
-        track_id = int(item["track_id"])
-        audio = load_prepared_audio(item["prepared_path"])
+        logger.info(
+            "Loaded test items count=%s manifest=%s",
+            len(items),
+            PREPARED_MANIFEST_PATH,
+        )
 
-        for duration_sec in durations_sec:
-            for clean_idx in range(per_track_clean_queries):
+        rows = []
+        failed_items = 0
+        positive_queries = 0
+
+        for item_idx, item in enumerate(items, start=1):
+            track_id = int(item["track_id"])
+            s3_key = item.get("s3_key")
+
+            try:
+                audio, audio_source = _load_eval_audio(item)
+            except Exception as exc:
+                failed_items += 1
+                logger.warning(
+                    "Failed to load eval audio track_id=%s s3_key=%s error=%s",
+                    track_id,
+                    s3_key,
+                    exc,
+                )
+                continue
+
+            for duration_sec in durations_sec:
+                for clean_idx in range(per_track_clean_queries):
+                    segment = cut_random_segment(audio, duration_sec)
+                    query_audio = apply_corruption(segment, "clean")
+
+                    query_id = f"track_{track_id}_clean_{duration_sec:.1f}s_{clean_idx}"
+                    query_path = _save_query_audio(query_audio, query_id)
+
+                    rows.append(
+                        {
+                            "query_id": query_id,
+                            "query_path": query_path,
+                            "track_id": track_id,
+                            "s3_key": s3_key,
+                            "bucket": "clean",
+                            "corruption": "clean",
+                            "duration_sec": duration_sec,
+                            "is_positive": True,
+                            "audio_source": audio_source,
+                        }
+                    )
+                    positive_queries += 1
+
+                for noisy_idx in range(per_track_noisy_queries):
+                    corruption = NOISY_BUCKETS[noisy_idx % len(NOISY_BUCKETS)]
+
+                    segment = cut_random_segment(audio, duration_sec)
+                    query_audio = apply_corruption(segment, corruption)
+
+                    query_id = f"track_{track_id}_{corruption}_{duration_sec:.1f}s_{noisy_idx}"
+                    query_path = _save_query_audio(query_audio, query_id)
+
+                    rows.append(
+                        {
+                            "query_id": query_id,
+                            "query_path": query_path,
+                            "track_id": track_id,
+                            "s3_key": s3_key,
+                            "bucket": "dirty",
+                            "corruption": corruption,
+                            "duration_sec": duration_sec,
+                            "is_positive": True,
+                            "audio_source": audio_source,
+                        }
+                    )
+                    positive_queries += 1
+
+            if item_idx % DATASET_PROGRESS_EVERY == 0 or item_idx == len(items):
+                logger.info(
+                    "Dataset generation progress tracks=%s/%s rows=%s positive=%s failed_items=%s",
+                    item_idx,
+                    len(items),
+                    len(rows),
+                    positive_queries,
+                    failed_items,
+                )
+
+        negative_items = items[:negative_limit]
+        negative_queries = 0
+
+        logger.info("Generating negative queries items=%s", len(negative_items))
+
+        for item_idx, item in enumerate(negative_items, start=1):
+            track_id = int(item["track_id"])
+            s3_key = item.get("s3_key")
+
+            try:
+                audio, audio_source = _load_eval_audio(item)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to load negative source track_id=%s s3_key=%s error=%s",
+                    track_id,
+                    s3_key,
+                    exc,
+                )
+                continue
+
+            for duration_sec in durations_sec:
                 segment = cut_random_segment(audio, duration_sec)
-                query_audio = apply_corruption(segment, "clean")
 
-                query_id = f"track_{track_id}_clean_{duration_sec:.1f}s_{clean_idx}"
-                query_path = _save_query_audio(query_audio, query_id)
+                noise = np.random.randn(len(segment)).astype(np.float32)
+                noise = normalize_peak(noise)
+
+                query_id = f"neg_noise_{track_id}_{duration_sec:.1f}s"
+                query_path = _save_query_audio(noise, query_id)
 
                 rows.append(
                     {
                         "query_id": query_id,
                         "query_path": query_path,
-                        "track_id": track_id,
-                        "s3_key": item.get("s3_key"),
-                        "bucket": "clean",
-                        "corruption": "clean",
+                        "track_id": None,
+                        "s3_key": None,
+                        "bucket": "negative",
+                        "corruption": "white_noise",
                         "duration_sec": duration_sec,
-                        "is_positive": True,
+                        "is_positive": False,
+                        "audio_source": audio_source,
                     }
                 )
+                negative_queries += 1
 
-            for noisy_idx in range(per_track_noisy_queries):
-                corruption = NOISY_BUCKETS[noisy_idx % len(NOISY_BUCKETS)]
-
-                segment = cut_random_segment(audio, duration_sec)
-                query_audio = apply_corruption(segment, corruption)
-
-                query_id = f"track_{track_id}_{corruption}_{duration_sec:.1f}s_{noisy_idx}"
-                query_path = _save_query_audio(query_audio, query_id)
+                reversed_audio = normalize_peak(segment[::-1].copy())
+                query_id = f"neg_reverse_{track_id}_{duration_sec:.1f}s"
+                query_path = _save_query_audio(reversed_audio, query_id)
 
                 rows.append(
                     {
                         "query_id": query_id,
                         "query_path": query_path,
-                        "track_id": track_id,
-                        "s3_key": item.get("s3_key"),
-                        "bucket": "dirty",
-                        "corruption": corruption,
+                        "track_id": None,
+                        "s3_key": None,
+                        "bucket": "negative",
+                        "corruption": "reversed_audio",
                         "duration_sec": duration_sec,
-                        "is_positive": True,
+                        "is_positive": False,
+                        "audio_source": audio_source,
                     }
                 )
+                negative_queries += 1
 
-    negative_items = items[:negative_limit]
+            if item_idx % DATASET_PROGRESS_EVERY == 0 or item_idx == len(negative_items):
+                logger.info(
+                    "Negative generation progress tracks=%s/%s negative_queries=%s total_rows=%s",
+                    item_idx,
+                    len(negative_items),
+                    negative_queries,
+                    len(rows),
+                )
 
-    for item in negative_items:
-        track_id = int(item["track_id"])
-        audio = load_prepared_audio(item["prepared_path"])
+        random.shuffle(rows)
+        write_jsonl(EVAL_QUERIES_PATH, rows)
 
-        for duration_sec in durations_sec:
-            segment = cut_random_segment(audio, duration_sec)
+        elapsed = time.perf_counter() - started
 
-            noise = np.random.randn(len(segment)).astype(np.float32)
-            noise = normalize_peak(noise)
+        summary = {
+            "queries": len(rows),
+            "positive_queries": sum(1 for x in rows if x["is_positive"]),
+            "negative_queries": sum(1 for x in rows if not x["is_positive"]),
+            "failed_items": failed_items,
+            "queries_path": str(EVAL_QUERIES_PATH),
+            "queries_dir": str(EVAL_QUERIES_DIR),
+            "audio_source": EVAL_AUDIO_SOURCE,
+            "elapsed_sec": elapsed,
+        }
 
-            query_id = f"neg_noise_{track_id}_{duration_sec:.1f}s"
-            query_path = _save_query_audio(noise, query_id)
+        logger.info("Eval dataset generated summary=%s", summary)
 
-            rows.append(
-                {
-                    "query_id": query_id,
-                    "query_path": query_path,
-                    "track_id": None,
-                    "s3_key": None,
-                    "bucket": "negative",
-                    "corruption": "white_noise",
-                    "duration_sec": duration_sec,
-                    "is_positive": False,
-                }
-            )
-
-            reversed_audio = normalize_peak(segment[::-1].copy())
-            query_id = f"neg_reverse_{track_id}_{duration_sec:.1f}s"
-            query_path = _save_query_audio(reversed_audio, query_id)
-
-            rows.append(
-                {
-                    "query_id": query_id,
-                    "query_path": query_path,
-                    "track_id": None,
-                    "s3_key": None,
-                    "bucket": "negative",
-                    "corruption": "reversed_audio",
-                    "duration_sec": duration_sec,
-                    "is_positive": False,
-                }
-            )
-
-    random.shuffle(rows)
-    write_jsonl(EVAL_QUERIES_PATH, rows)
-
-    return {
-        "queries": len(rows),
-        "positive_queries": sum(1 for x in rows if x["is_positive"]),
-        "negative_queries": sum(1 for x in rows if not x["is_positive"]),
-        "queries_path": str(EVAL_QUERIES_PATH),
-        "queries_dir": str(EVAL_QUERIES_DIR),
-    }
+        return summary

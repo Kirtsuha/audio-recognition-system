@@ -202,7 +202,11 @@ def run_full_pipeline(bucket: str, prefix: str) -> None:
         update_status(phase="evaluate")
         metrics_path = run_dir / "metrics.json"
         with log_stage(logger, "evaluate-prepared", metrics_path=str(metrics_path)):
-            evaluate_prepared(model_path=model_path, output_metrics_path=metrics_path)
+            evaluate_prepared(
+                model_path=model_path,
+                output_metrics_path=metrics_path,
+                use_full_query_audio=True,
+            )
 
         update_status(phase="build-embeddings")
         embeddings_path = run_dir / "embeddings.npy"

@@ -1,16 +1,124 @@
+import logging
 import random
+import tempfile
 
+import boto3
 import librosa
 import numpy as np
+from botocore.exceptions import ClientError
 
-from app.config import SR
+from app.config import (
+    S3_ACCESS_KEY,
+    S3_BUCKET,
+    S3_ENDPOINT,
+    S3_PREFIX_CANDIDATES,
+    S3_SECRET_KEY,
+    SR,
+)
+
+logger = logging.getLogger("evaluation.audio")
+
+
+def get_s3_client():
+    return boto3.client(
+        "s3",
+        endpoint_url=S3_ENDPOINT,
+        aws_access_key_id=S3_ACCESS_KEY,
+        aws_secret_access_key=S3_SECRET_KEY,
+        region_name="us-east-1",
+        use_ssl=False,
+    )
+
+
+def _candidate_s3_keys(s3_key: str) -> list[str]:
+    keys = [s3_key]
+
+    for prefix in S3_PREFIX_CANDIDATES:
+        if not prefix:
+            continue
+
+        prefix = prefix.strip("/")
+        clean_key = s3_key.lstrip("/")
+
+        keys.append(f"{prefix}/{clean_key}")
+
+        if clean_key.startswith(f"{prefix}/"):
+            keys.append(clean_key.replace(f"{prefix}/", "", 1))
+
+    result = []
+    seen = set()
+
+    for key in keys:
+        key = key.lstrip("/")
+        if key and key not in seen:
+            result.append(key)
+            seen.add(key)
+
+    return result
+
+
+def load_s3_audio(s3_key: str, bucket: str = S3_BUCKET) -> np.ndarray:
+    s3 = get_s3_client()
+    candidates = _candidate_s3_keys(s3_key)
+
+    last_error = None
+
+    for candidate_key in candidates:
+        try:
+            logger.debug("Trying S3 audio bucket=%s key=%s", bucket, candidate_key)
+
+            with tempfile.NamedTemporaryFile(suffix=".audio", delete=True) as tmp:
+                s3.download_fileobj(bucket, candidate_key, tmp)
+                tmp.flush()
+
+                audio, _ = librosa.load(tmp.name, sr=SR, mono=True)
+
+            logger.debug(
+                "Loaded S3 audio bucket=%s key=%s samples=%s sr=%s",
+                bucket,
+                candidate_key,
+                len(audio),
+                SR,
+            )
+
+            return audio.astype(np.float32)
+
+        except ClientError as exc:
+            last_error = exc
+            code = exc.response.get("Error", {}).get("Code")
+            if code not in {"404", "NoSuchKey", "NotFound"}:
+                logger.warning(
+                    "S3 audio load failed bucket=%s key=%s error=%s",
+                    bucket,
+                    candidate_key,
+                    exc,
+                )
+
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "Audio decode failed bucket=%s key=%s error=%s",
+                bucket,
+                candidate_key,
+                exc,
+            )
+
+    raise FileNotFoundError(
+        f"Could not load S3 audio. bucket={bucket}, original_key={s3_key}, "
+        f"tried={candidates}, last_error={last_error}"
+    )
 
 
 def load_prepared_audio(path: str) -> np.ndarray:
+    logger.debug("Loading prepared audio path=%s", path)
+
     if path.endswith(".npy"):
-        return np.load(path).astype(np.float32)
+        audio = np.load(path).astype(np.float32)
+        logger.debug("Loaded prepared npy path=%s samples=%s", path, len(audio))
+        return audio
 
     audio, _ = librosa.load(path, sr=SR, mono=True)
+    logger.debug("Loaded prepared audio path=%s samples=%s sr=%s", path, len(audio), SR)
     return audio.astype(np.float32)
 
 

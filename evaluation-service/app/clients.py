@@ -1,7 +1,10 @@
+import logging
 import time
 from pathlib import Path
 
 import requests
+
+logger = logging.getLogger("evaluation.clients")
 
 
 def post_audio_file(
@@ -27,6 +30,17 @@ def post_audio_file(
         )
 
     latency_ms = (time.perf_counter() - started) * 1000.0
+
+    if response.status_code >= 400:
+        logger.warning(
+            "Audio request failed url=%s path=%s status=%s latency_ms=%.2f body=%s",
+            url,
+            audio_path,
+            response.status_code,
+            latency_ms,
+            response.text[:500],
+        )
+
     response.raise_for_status()
 
     return response.json(), latency_ms

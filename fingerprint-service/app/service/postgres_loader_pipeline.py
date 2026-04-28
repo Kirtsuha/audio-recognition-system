@@ -5,6 +5,7 @@ import tempfile
 import zlib
 from io import BytesIO
 from pathlib import Path, PurePosixPath
+import soundfile as sf
 
 import pandas as pd
 from sqlalchemy.dialects.postgresql import insert
@@ -16,29 +17,19 @@ from repository.models import Fingerprint, Track
 from repository.s3_client import get_s3
 from service.audio2fingerprint import fingerprint_audio
 
-logger = logging.getLogger(__name__)
+import logging
 
-S3_BUCKET = os.getenv("S3_BUCKET", "tracks")
-S3_PREFIX = os.getenv("S3_PREFIX", "fma/").rstrip("/") + "/"
+logger = logging.getLogger("fingerprint.indexer")
 AUDIO_EXT = (".mp3", ".wav", ".flac", ".ogg")
-FMA_METADATA_CSV = Path(__file__).resolve().parent.parent / "data" / "tracks.csv"
 
+from config.config import INDEX_DURATION_SEC
 s3 = get_s3()
 df_tracks = None
 
 
 def get_tracks_metadata():
     global df_tracks
-
-    if df_tracks is not None:
-        return df_tracks
-
-    if not FMA_METADATA_CSV.exists():
-        df_tracks = pd.DataFrame()
-        return df_tracks
-
-    df_tracks = pd.read_csv(FMA_METADATA_CSV, index_col=0, low_memory=False)
-    return df_tracks
+    df_tracks = pd.DataFrame()
 
 
 def is_audio_file(path: str) -> bool:
@@ -57,7 +48,13 @@ def track_already_processed(db: Session, track_id: int) -> bool:
     return db.query(Fingerprint.track_id).filter(Fingerprint.track_id == track_id).first() is not None
 
 
-def upload_track_to_db(db: Session, track_id: int, s3_key: str) -> Track:
+def upload_track_to_db(
+    db: Session,
+    track_id: int,
+    s3_key: str,
+    duration_sec: float | None = None,
+    fingerprint_count: int | None = None,
+) -> Track:
     path = PurePosixPath(s3_key)
     default_title = path.stem
     default_artist = path.parent.name if path.parent.name else "unknown"
@@ -75,7 +72,12 @@ def upload_track_to_db(db: Session, track_id: int, s3_key: str) -> Track:
         artist = default_artist
 
     existing = db.query(Track).filter(Track.id == track_id).first()
+
     if existing:
+        existing.duration_sec = int(duration_sec) if duration_sec is not None else existing.duration_sec
+        existing.fingerprint_count = fingerprint_count if fingerprint_count is not None else existing.fingerprint_count
+        db.commit()
+        db.refresh(existing)
         return existing
 
     track = Track(
@@ -83,12 +85,29 @@ def upload_track_to_db(db: Session, track_id: int, s3_key: str) -> Track:
         title=str(title),
         artist=str(artist),
         s3_key=s3_key,
+        duration_sec=int(duration_sec) if duration_sec is not None else None,
+        fingerprint_count=fingerprint_count,
     )
+
     db.add(track)
     db.commit()
     db.refresh(track)
+
     return track
 
+def get_audio_duration_sec(path: str) -> float | None:
+    try:
+        info = sf.info(path)
+        if info.frames and info.samplerate:
+            return float(info.frames / info.samplerate)
+    except Exception:
+        logger.warning("Failed to read duration using soundfile: %s", path, exc_info=True)
+
+    return None
+
+def chunks(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
 
 def process_s3_track(s3_key: str, db: Session, s3_bucket: str, s3_prefix: str) -> dict:
     if not is_audio_file(s3_key):
@@ -108,23 +127,61 @@ def process_s3_track(s3_key: str, db: Session, s3_bucket: str, s3_prefix: str) -
     with tempfile.NamedTemporaryFile(delete=True) as tmp:
         shutil.copyfileobj(audio_stream, tmp)
         tmp.flush()
-        logger.info("Generating hashes for track %s", track_id)
-        hashes = fingerprint_audio(tmp.name)
 
-    track = upload_track_to_db(db, track_id, s3_key)
+        duration_sec = get_audio_duration_sec(tmp.name)
+
+        logger.info("Generating hashes for track %s", track_id)
+        hashes = fingerprint_audio(tmp.name, duration=INDEX_DURATION_SEC)
+
+    track = upload_track_to_db(
+        db=db,
+        track_id=track_id,
+        s3_key=s3_key,
+        duration_sec=duration_sec,
+        fingerprint_count=len(hashes),
+    )
 
     batch = [
-        {"hash": int(hash_value), "track_id": track.id, "time_offset": int(time_offset)}
+        {
+            "hash": int(hash_value),
+            "track_id": track.id,
+            "time_offset": int(time_offset),
+        }
         for hash_value, time_offset in hashes
     ]
+
     if batch:
-        stmt = insert(Fingerprint).values(batch)
-        stmt = stmt.on_conflict_do_nothing(index_elements=["hash", "track_id", "time_offset"])
-        db.execute(stmt)
+        for part in chunks(batch, 10_000):
+            stmt = insert(Fingerprint).values(part)
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["hash", "track_id", "time_offset"]
+            )
+            db.execute(stmt)
+
         db.commit()
 
-    logger.info("Indexed track %s: %s hashes saved", track_id, len(hashes))
-    return {"status": "indexed", "track_id": track_id, "s3_key": s3_key, "hashes": len(hashes)}
+    hashes_per_second = (
+        len(hashes) / max(1.0, duration_sec)
+        if duration_sec is not None
+        else None
+    )
+
+    logger.info(
+        "Indexed track %s: hashes=%s duration_sec=%s hashes_per_second=%s",
+        track_id,
+        len(hashes),
+        duration_sec,
+        hashes_per_second,
+    )
+
+    return {
+        "status": "indexed",
+        "track_id": track_id,
+        "s3_key": s3_key,
+        "duration_sec": duration_sec,
+        "hashes": len(hashes),
+        "hashes_per_second": hashes_per_second,
+    }
 
 
 def process_s3_bucket(s3_bucket: str, s3_prefix: str) -> dict:

@@ -1,14 +1,22 @@
+import logging
+
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 
 from app.config import (
     COMBINED_RESULTS_PATH,
+    EVAL_AUDIO_SOURCE,
     EVAL_QUERIES_PATH,
     FINGERPRINT_RESULTS_PATH,
     METRICS_PATH,
     ML_RESULTS_PATH,
     PREPARED_MANIFEST_PATH,
+    S3_BUCKET,
+    S3_ENDPOINT,
+    SR,
 )
 from app.dataset import generate_eval_dataset
+from app.logging_utils import configure_logging, log_stage
 from app.metrics import build_all_metrics
 from app.runners import (
     run_combined_evaluation,
@@ -18,7 +26,15 @@ from app.runners import (
 from app.schemas import EvalRunRequest, GenerateEvalDatasetRequest, RunAllRequest
 from app.utils import read_jsonl
 
+configure_logging()
+logger = logging.getLogger("evaluation-service")
+
 app = FastAPI(title="Music Recognition Evaluation Service")
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return RedirectResponse(url="/docs")
 
 
 @app.get("/health")
@@ -27,6 +43,10 @@ def health():
         "status": "ok",
         "prepared_manifest_exists": PREPARED_MANIFEST_PATH.exists(),
         "eval_queries_exists": EVAL_QUERIES_PATH.exists(),
+        "audio_source": EVAL_AUDIO_SOURCE,
+        "sr": SR,
+        "s3_endpoint": S3_ENDPOINT,
+        "s3_bucket": S3_BUCKET,
     }
 
 
@@ -46,11 +66,17 @@ def evaluation_status():
         "combined_results_exists": COMBINED_RESULTS_PATH.exists(),
         "metrics_path": str(METRICS_PATH),
         "metrics_exists": METRICS_PATH.exists(),
+        "audio_source": EVAL_AUDIO_SOURCE,
+        "sr": SR,
+        "s3_endpoint": S3_ENDPOINT,
+        "s3_bucket": S3_BUCKET,
     }
 
 
 @app.post("/evaluation/dataset/generate")
 def generate_dataset_endpoint(payload: GenerateEvalDatasetRequest):
+    logger.info("Request: generate dataset payload=%s", payload.model_dump())
+
     return generate_eval_dataset(
         per_track_clean_queries=payload.per_track_clean_queries,
         per_track_noisy_queries=payload.per_track_noisy_queries,
@@ -62,6 +88,8 @@ def generate_dataset_endpoint(payload: GenerateEvalDatasetRequest):
 
 @app.post("/evaluation/fingerprint/run")
 def run_fingerprint_endpoint(payload: EvalRunRequest):
+    logger.info("Request: run fingerprint evaluation payload=%s", payload.model_dump())
+
     return run_fingerprint_evaluation(
         limit=payload.limit,
         timeout_sec=payload.timeout_sec,
@@ -70,6 +98,8 @@ def run_fingerprint_endpoint(payload: EvalRunRequest):
 
 @app.post("/evaluation/ml/run")
 def run_ml_endpoint(payload: EvalRunRequest):
+    logger.info("Request: run ML evaluation payload=%s", payload.model_dump())
+
     return run_ml_evaluation(
         limit=payload.limit,
         timeout_sec=payload.timeout_sec,
@@ -78,6 +108,8 @@ def run_ml_endpoint(payload: EvalRunRequest):
 
 @app.post("/evaluation/combined/run")
 def run_combined_endpoint(payload: EvalRunRequest):
+    logger.info("Request: run combined evaluation payload=%s", payload.model_dump())
+
     return run_combined_evaluation(
         limit=payload.limit,
         timeout_sec=payload.timeout_sec,
@@ -86,37 +118,42 @@ def run_combined_endpoint(payload: EvalRunRequest):
 
 @app.post("/evaluation/metrics/build")
 def build_metrics_endpoint():
+    logger.info("Request: build metrics")
     return build_all_metrics()
 
 
 @app.post("/evaluation/run-all")
 def run_all_endpoint(payload: RunAllRequest):
-    result = {}
+    logger.info("Request: run all payload=%s", payload.model_dump())
 
-    if payload.generate_dataset:
-        result["dataset"] = generate_eval_dataset(
-            per_track_clean_queries=payload.per_track_clean_queries,
-            per_track_noisy_queries=payload.per_track_noisy_queries,
-            durations_sec=payload.durations_sec,
-            test_limit=payload.test_limit,
-            negative_limit=payload.negative_limit,
+    with log_stage(logger, "run-all"):
+        result = {}
+
+        if payload.generate_dataset:
+            result["dataset"] = generate_eval_dataset(
+                per_track_clean_queries=payload.per_track_clean_queries,
+                per_track_noisy_queries=payload.per_track_noisy_queries,
+                durations_sec=payload.durations_sec,
+                test_limit=payload.test_limit,
+                negative_limit=payload.negative_limit,
+            )
+
+        result["fingerprint"] = run_fingerprint_evaluation(
+            limit=payload.eval_limit,
+            timeout_sec=payload.timeout_sec,
         )
 
-    result["fingerprint"] = run_fingerprint_evaluation(
-        limit=payload.eval_limit,
-        timeout_sec=payload.timeout_sec,
-    )
+        result["ml"] = run_ml_evaluation(
+            limit=payload.eval_limit,
+            timeout_sec=payload.timeout_sec,
+        )
 
-    result["ml"] = run_ml_evaluation(
-        limit=payload.eval_limit,
-        timeout_sec=payload.timeout_sec,
-    )
+        result["combined"] = run_combined_evaluation(
+            limit=payload.eval_limit,
+            timeout_sec=payload.timeout_sec,
+        )
 
-    result["combined"] = run_combined_evaluation(
-        limit=payload.eval_limit,
-        timeout_sec=payload.timeout_sec,
-    )
+        result["metrics"] = build_all_metrics()
 
-    result["metrics"] = build_all_metrics()
-
-    return result
+        logger.info("Run all finished")
+        return result

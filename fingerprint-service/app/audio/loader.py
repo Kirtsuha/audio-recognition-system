@@ -2,10 +2,10 @@ import librosa
 import soundfile as sf
 import numpy as np
 
-from config.config import SAMPLE_RATE, RECOGNITION_DURATION_SEC
+from config.config import SAMPLE_RATE
 
 
-def load_audio(path, sr=SAMPLE_RATE, duration=RECOGNITION_DURATION_SEC):
+def load_audio(path, sr=SAMPLE_RATE, duration=None):
     try:
         y, file_sr = librosa.load(
             path,

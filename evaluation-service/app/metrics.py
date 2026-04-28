@@ -1,3 +1,4 @@
+import logging
 from collections import defaultdict
 
 from app.config import (
@@ -6,7 +7,10 @@ from app.config import (
     METRICS_PATH,
     ML_RESULTS_PATH,
 )
+from app.logging_utils import log_stage
 from app.utils import percentile, read_jsonl, write_json
+
+logger = logging.getLogger("evaluation.metrics")
 
 
 def _mean(values: list[float]) -> float | None:
@@ -92,11 +96,13 @@ def _grouped(rows: list[dict], metric_fn) -> dict:
     by_bucket = defaultdict(list)
     by_corruption = defaultdict(list)
     by_duration = defaultdict(list)
+    by_audio_source = defaultdict(list)
 
     for row in rows:
         by_bucket[str(row.get("bucket"))].append(row)
         by_corruption[str(row.get("corruption"))].append(row)
         by_duration[str(row.get("duration_sec"))].append(row)
+        by_audio_source[str(row.get("audio_source"))].append(row)
 
     return {
         "overall": metric_fn(rows),
@@ -106,28 +112,48 @@ def _grouped(rows: list[dict], metric_fn) -> dict:
             k: metric_fn(v)
             for k, v in sorted(by_duration.items(), key=lambda x: float(x[0]))
         },
+        "by_audio_source": {
+            k: metric_fn(v)
+            for k, v in sorted(by_audio_source.items())
+        },
     }
 
+def _delete_if_exists(path):
+    try:
+        path.unlink(missing_ok=True)
+    except Exception:
+        logger.warning("Failed to delete old file path=%s", path, exc_info=True)
 
 def build_all_metrics() -> dict:
-    fp_rows = read_jsonl(FINGERPRINT_RESULTS_PATH)
-    ml_rows = read_jsonl(ML_RESULTS_PATH)
-    combined_rows = read_jsonl(COMBINED_RESULTS_PATH)
+    with log_stage(logger, "build-all-metrics"):
+        fp_rows = read_jsonl(FINGERPRINT_RESULTS_PATH)
+        ml_rows = read_jsonl(ML_RESULTS_PATH)
+        combined_rows = read_jsonl(COMBINED_RESULTS_PATH)
 
-    summary = {
-        "fingerprint": _grouped(fp_rows, _single_service_metrics) if fp_rows else None,
-        "ml": _grouped(ml_rows, _single_service_metrics) if ml_rows else None,
-        "combined": None,
-    }
+        logger.info(
+            "Loaded result rows fingerprint=%s ml=%s combined=%s",
+            len(fp_rows),
+            len(ml_rows),
+            len(combined_rows),
+        )
 
-    if combined_rows:
-        summary["combined"] = {
-            "overall": {
-                "fingerprint": _service_from_combined(combined_rows, "fingerprint"),
-                "ml": _service_from_combined(combined_rows, "ml"),
-                "comparison": _comparison_metrics(combined_rows),
-            }
+        summary = {
+            "fingerprint": _grouped(fp_rows, _single_service_metrics) if fp_rows else None,
+            "ml": _grouped(ml_rows, _single_service_metrics) if ml_rows else None,
+            "combined": None,
         }
 
-    write_json(METRICS_PATH, summary)
-    return summary
+        if combined_rows:
+            summary["combined"] = {
+                "overall": {
+                    "fingerprint": _service_from_combined(combined_rows, "fingerprint"),
+                    "ml": _service_from_combined(combined_rows, "ml"),
+                    "comparison": _comparison_metrics(combined_rows),
+                }
+            }
+
+        write_json(METRICS_PATH, summary)
+
+        logger.info("Metrics written path=%s", METRICS_PATH)
+
+        return summary

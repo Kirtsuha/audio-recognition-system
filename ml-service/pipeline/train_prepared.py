@@ -86,9 +86,12 @@ class PreparedTripletDataset(Dataset):
 
     def __getitem__(self, idx: int):
         anchor_item = self.items[idx]
-        anchor = self._load_segment(anchor_item["prepared_path"])
+        audio = self._load_audio(anchor_item["prepared_path"])
 
-        positive = augment_audio(anchor)
+        anchor = pad_or_trim(random_segment(audio))
+
+        positive = pad_or_trim(random_segment(audio))
+        positive = augment_audio(positive)
         positive = pad_or_trim(positive)
 
         negative_item = None

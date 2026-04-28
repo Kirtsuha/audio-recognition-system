@@ -2,8 +2,12 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from repository.models import Fingerprint
-from config.config import MIN_ALIGNED_MATCHES, MIN_QUERY_COVERAGE, MIN_SCORE_GAP
-
+from config.config import (
+    MIN_ALIGNED_MATCHES,
+    MIN_QUERY_COVERAGE,
+    MIN_SCORE_GAP,
+    OFFSET_TOLERANCE_FRAMES, OFFSET_BIN,
+)
 
 @dataclass
 class MatchDecision:
@@ -17,12 +21,35 @@ class MatchDecision:
     confidence: float = 0.0
     score_gap: float = 0.0
     reason: str | None = None
+    top_candidates: list[dict] | None = None
 
 
 def chunks(lst, size):
     for i in range(0, len(lst), size):
         yield lst[i:i + size]
 
+def _aggregate_offset_votes(votes: dict) -> dict:
+    by_track = defaultdict(list)
+
+    for (track_id, offset), count in votes.items():
+        by_track[track_id].append((offset, count))
+
+    aggregated = {}
+
+    for track_id, items in by_track.items():
+        items = sorted(items)
+
+        for offset, _count in items:
+            total = 0
+
+            for other_offset, other_count in items:
+                if abs(other_offset - offset) <= OFFSET_TOLERANCE_FRAMES:
+                    total += other_count
+
+            key = (track_id, offset)
+            aggregated[key] = max(aggregated.get(key, 0), total)
+
+    return aggregated
 
 def _confidence(best: int, second: int, query_hashes: int, unique_query_hashes: int) -> float:
     if query_hashes <= 0:
@@ -62,7 +89,8 @@ def match(hashes, db) -> dict:
         for h, track_id, db_offset in rows:
             for query_offset in query_offsets_by_hash[int(h)]:
                 delta = int(db_offset) - int(query_offset)
-                votes[(int(track_id), delta)] += 1
+                delta_q = delta // OFFSET_BIN
+                votes[(int(track_id), delta_q)] += 1
 
     if not votes:
         return MatchDecision(
@@ -71,10 +99,27 @@ def match(hashes, db) -> dict:
             unique_query_hashes=len(hash_values),
             reason="no_votes",
         ).__dict__
+    votes = _aggregate_offset_votes(votes)
 
-    ranked = sorted(votes.items(), key=lambda x: x[1], reverse=True)
-    (track_id, offset), best = ranked[0]
-    second = ranked[1][1] if len(ranked) > 1 else 0
+    track_scores = defaultdict(int)
+
+    for (candidate_track_id, _offset), count in votes.items():
+        if count > track_scores[candidate_track_id]:
+            track_scores[candidate_track_id] = count
+
+    ranked_tracks = sorted(track_scores.items(), key=lambda x: x[1], reverse=True)
+
+    best_track_id, best_track_score = ranked_tracks[0]
+    second_track_score = ranked_tracks[1][1] if len(ranked_tracks) > 1 else 0
+
+    best_offsets = [
+        ((track_id, offset), count)
+        for (track_id, offset), count in votes.items()
+        if track_id == best_track_id
+    ]
+
+    (track_id, offset), best = max(best_offsets, key=lambda x: x[1])
+    second = second_track_score
 
     score_gap = best / max(1, second)
     confidence = _confidence(best, second, len(hashes), len(hash_values))
@@ -97,6 +142,13 @@ def match(hashes, db) -> dict:
             confidence=confidence,
             score_gap=round(float(score_gap), 4),
             reason="low_confidence",
+            top_candidates=[
+                {
+                    "track_id": int(track_id),
+                    "aligned_matches": int(score),
+                }
+                for track_id, score in ranked_tracks[:5]
+            ]
         ).__dict__
 
     return MatchDecision(
@@ -109,4 +161,11 @@ def match(hashes, db) -> dict:
         unique_query_hashes=len(hash_values),
         confidence=confidence,
         score_gap=round(float(score_gap), 4),
+        top_candidates=[
+            {
+                "track_id": int(track_id),
+                "aligned_matches": int(score),
+            }
+            for track_id, score in ranked_tracks[:5]
+        ]
     ).__dict__

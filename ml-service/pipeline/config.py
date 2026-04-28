@@ -50,9 +50,12 @@ FAISS_TOP_K = int(os.getenv("FAISS_TOP_K", "15"))
 INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "24"))
 
 # Acceptance thresholds
-MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.58"))
-MIN_MARGIN = float(os.getenv("MIN_MARGIN", "0.10"))
-MIN_SUPPORTED_WINDOWS = int(os.getenv("MIN_SUPPORTED_WINDOWS", "2"))
+# MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.58"))
+# MIN_MARGIN = float(os.getenv("MIN_MARGIN", "0.10"))
+# MIN_SUPPORTED_WINDOWS = int(os.getenv("MIN_SUPPORTED_WINDOWS", "2"))
+MIN_CONFIDENCE=0.55
+MIN_MARGIN=0.0
+MIN_SUPPORTED_WINDOWS=1
 
 # Train
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "24"))

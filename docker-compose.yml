@@ -226,6 +226,17 @@ services:
       COMBINED_RESULTS_PATH: /app/eval/combined_results.jsonl
       METRICS_PATH: /app/eval/metrics.json
 
+      EVAL_AUDIO_SOURCE: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: full-tracks
+
+      LOG_LEVEL: INFO
+      DATASET_PROGRESS_EVERY: 25
+      RUNNER_PROGRESS_EVERY: 25
+      S3_PREFIX_CANDIDATES: ",fma/"
+
       EVAL_SR: 16000
     ports:
       - "8020:8020"
