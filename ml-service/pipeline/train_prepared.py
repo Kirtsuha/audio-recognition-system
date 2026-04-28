@@ -92,7 +92,6 @@ class PreparedTripletDataset(Dataset):
 
         positive = pad_or_trim(random_segment(audio))
         positive = augment_audio(positive)
-        positive = pad_or_trim(positive)
 
         negative_item = None
         for _ in range(TRAIN_NEGATIVE_RETRIES):

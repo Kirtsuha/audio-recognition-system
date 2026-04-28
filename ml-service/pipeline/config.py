@@ -47,7 +47,7 @@ FMAX = float(os.getenv("FMAX", str(SR // 2)))
 # Embeddings / Index
 EMB_DIM = int(os.getenv("EMB_DIM", "128"))
 FAISS_TOP_K = int(os.getenv("FAISS_TOP_K", "15"))
-INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "24"))
+INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "64"))
 
 # Acceptance thresholds
 # MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.58"))
