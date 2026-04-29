@@ -17,7 +17,7 @@ from pipeline.config import (
     MODEL_PATH,
     SONG_IDS_PATH,
 )
-from pipeline.to_mel import to_mel
+from pipeline.to_mel import to_mel_batch
 
 logger = logging.getLogger("ml-service.runtime")
 
@@ -116,16 +116,28 @@ def should_accept(result: dict[str, Any]) -> bool:
     )
 
 
-def embed_windows(windows: list[np.ndarray]) -> np.ndarray:
+def embed_windows(windows: list[np.ndarray], batch_size: int = 64) -> np.ndarray:
     runtime = get_runtime()
 
-    batch = torch.stack([to_mel(w) for w in windows]).to(runtime.device)
+    all_embs = []
 
     with torch.inference_mode():
-        embs = runtime.model(batch).detach().cpu().numpy().astype("float32")
+        for start in range(0, len(windows), batch_size):
+            chunk = windows[start:start + batch_size]
+            audio_batch = np.stack(chunk).astype("float32")
 
-    faiss.normalize_L2(embs)
-    return embs
+            mel_batch = to_mel_batch(
+                audio_batch,
+                device=runtime.device,
+                normalize=True,
+            )
+
+            embs = runtime.model(mel_batch)
+            all_embs.append(embs.detach().cpu().numpy().astype("float32"))
+
+    embs_np = np.concatenate(all_embs, axis=0)
+    faiss.normalize_L2(embs_np)
+    return embs_np
 
 
 def runtime_status() -> dict[str, Any]:

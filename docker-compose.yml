@@ -109,6 +109,13 @@ services:
       - "8000:8000"
 
   ml-service:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
     build:
       context: ./ml-service
       dockerfile: Dockerfile
@@ -164,6 +171,14 @@ services:
     shm_size: "1gb"
 
   ml-pipeline-runner:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+
     build:
       context: ./ml-service
       dockerfile: Dockerfile.pipeline

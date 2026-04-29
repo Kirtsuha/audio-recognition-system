@@ -22,7 +22,7 @@ from pipeline.config import (
 )
 from pipeline.dataset import pad_or_trim, random_segment
 from pipeline.manifest import iter_prepared_manifest
-from pipeline.to_mel import to_mel
+from pipeline.to_mel import to_mel_batch
 
 logger = logging.getLogger("ml-pipeline.train")
 
@@ -114,9 +114,9 @@ class PreparedTripletDataset(Dataset):
 def collate_to_mel(batch):
     anchors, positives, negatives = zip(*batch)
 
-    a = torch.stack([to_mel(x) for x in anchors])
-    p = torch.stack([to_mel(x) for x in positives])
-    n = torch.stack([to_mel(x) for x in negatives])
+    a = torch.from_numpy(np.stack(anchors).astype("float32"))
+    p = torch.from_numpy(np.stack(positives).astype("float32"))
+    n = torch.from_numpy(np.stack(negatives).astype("float32"))
 
     return a, p, n
 
@@ -138,8 +138,9 @@ def train_prepared(
         shuffle=True,
         num_workers=NUM_WORKERS,
         collate_fn=collate_to_mel,
-        pin_memory=False,
+        pin_memory=torch.cuda.is_available(),
         persistent_workers=NUM_WORKERS > 0,
+        prefetch_factor=2 if NUM_WORKERS > 0 else None,
     )
 
     logger.info(
@@ -164,13 +165,17 @@ def train_prepared(
         logger.info("Epoch started epoch=%s/%s", epoch + 1, epochs)
 
         for batch_idx, (a, p, n) in enumerate(loader, start=1):
-            a = a.to(device)
-            p = p.to(device)
-            n = n.to(device)
+            a = a.to(device, non_blocking=True)
+            p = p.to(device, non_blocking=True)
+            n = n.to(device, non_blocking=True)
 
-            emb_a = model(a)
-            emb_p = model(p)
-            emb_n = model(n)
+            a_mel = to_mel_batch(a, device=device, normalize=True)
+            p_mel = to_mel_batch(p, device=device, normalize=True)
+            n_mel = to_mel_batch(n, device=device, normalize=True)
+
+            emb_a = model(a_mel)
+            emb_p = model(p_mel)
+            emb_n = model(n_mel)
 
             loss = loss_fn(emb_a, emb_p, emb_n)
 

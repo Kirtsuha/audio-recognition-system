@@ -14,7 +14,7 @@ from pipeline.config import (
     INDEX_WINDOWS_PER_SONG,
     FAISS_TOP_K,
     CACHE_PREPARED_IN_MEMORY,
-    CACHE_PREPARED_MAX_TRACKS,
+    CACHE_PREPARED_MAX_TRACKS, EMB_DIM,
 )
 from pipeline.dataset import (
     extract_sliding_windows,
@@ -23,7 +23,9 @@ from pipeline.dataset import (
     random_segment,
 )
 from pipeline.manifest import iter_prepared_manifest, load_prepared_manifest
-from pipeline.to_mel import to_mel
+from pipeline.to_mel import to_mel_batch
+
+from collections import defaultdict
 
 logger = logging.getLogger("ml-pipeline.evaluate")
 
@@ -58,14 +60,38 @@ def embed_windows(
     model: AudioEncoder,
     windows: list[np.ndarray],
     device: torch.device,
+    batch_size: int = 256,
 ) -> np.ndarray:
-    batch = torch.stack([to_mel(w) for w in windows]).to(device)
+    if not windows:
+        return np.empty((0, EMB_DIM), dtype="float32")
+
+    all_embs: list[np.ndarray] = []
 
     with torch.inference_mode():
-        embs = model(batch).cpu().numpy().astype("float32")
+        for start in range(0, len(windows), batch_size):
+            chunk = windows[start:start + batch_size]
+            audio_batch = np.stack(chunk).astype("float32")
 
-    faiss.normalize_L2(embs)
-    return embs
+            mel_batch = to_mel_batch(
+                audio_batch,
+                device=device,
+                normalize=True,
+            )
+
+            with torch.autocast(
+                device_type="cuda",
+                dtype=torch.float16,
+                enabled=device.type == "cuda",
+            ):
+                embs = model(mel_batch)
+
+            all_embs.append(
+                embs.float().detach().cpu().numpy().astype("float32")
+            )
+
+    result = np.concatenate(all_embs, axis=0)
+    faiss.normalize_L2(result)
+    return result
 
 
 def build_eval_index(
@@ -74,37 +100,111 @@ def build_eval_index(
     cache: PreparedAudioCache,
     device: torch.device,
     windows_per_song: int,
+    embed_batch_size: int = 64,
 ) -> tuple[faiss.Index, np.ndarray]:
     all_embeddings: list[np.ndarray] = []
     all_song_ids: list[int] = []
 
+    pending_windows: list[np.ndarray] = []
+    pending_song_ids: list[int] = []
+
+    timings = defaultdict(float)
+    flush_count = 0
+
+    def flush_pending() -> None:
+        nonlocal pending_windows, pending_song_ids
+
+        # logger.info("Eval flush start windows=%s batch_size=%s", len(pending_windows), embed_batch_size)
+        if not pending_windows:
+            return
+
+        embs = embed_windows(
+            model=model,
+            windows=pending_windows,
+            device=device,
+            batch_size=embed_batch_size,
+        )
+        # logger.info("Eval flush finished embeddings=%s", embs.shape[0])
+
+        all_embeddings.append(embs)
+        all_song_ids.extend(pending_song_ids)
+
+        pending_windows = []
+        pending_song_ids = []
+
     for idx, row in enumerate(items, start=1):
         audio = cache.load(row["prepared_path"])
+        track_id = int(row["track_id"])
 
         windows = extract_uniform_index_windows(
             audio,
             n_windows=windows_per_song,
         )
 
-        embs = embed_windows(model, windows, device)
+        pending_windows.extend(windows)
+        pending_song_ids.extend([track_id] * len(windows))
 
-        for emb in embs:
-            all_embeddings.append(emb)
-            all_song_ids.append(int(row["track_id"]))
+        if len(pending_windows) >= embed_batch_size:
+            flush_pending()
 
         if idx % 250 == 0 or idx == len(items):
             logger.info(
-                "Eval index build progress processed=%s/%s vectors=%s",
+                "Eval index build progress processed=%s/%s vectors=%s pending=%s",
                 idx,
                 len(items),
-                len(all_embeddings),
+                sum(len(x) for x in all_embeddings),
+                len(pending_windows),
             )
 
-    embeddings = np.asarray(all_embeddings, dtype="float32")
+    flush_pending()
+
+    for idx, row in enumerate(items, start=1):
+        t0 = time.perf_counter()
+        audio = cache.load(row["prepared_path"])
+        timings["load_audio"] += time.perf_counter() - t0
+
+        track_id = int(row["track_id"])
+
+        t0 = time.perf_counter()
+        windows = extract_uniform_index_windows(
+            audio,
+            n_windows=windows_per_song,
+        )
+        timings["extract_windows"] += time.perf_counter() - t0
+
+        pending_windows.extend(windows)
+        pending_song_ids.extend([track_id] * len(windows))
+
+        if len(pending_windows) >= embed_batch_size:
+            t0 = time.perf_counter()
+            flush_pending()
+            timings["flush_embed"] += time.perf_counter() - t0
+            flush_count += 1
+
+        if idx % 250 == 0 or idx == len(items):
+            total_vectors = sum(len(x) for x in all_embeddings)
+            logger.info(
+                "Eval index progress processed=%s/%s vectors=%s pending=%s timings=%s flush_count=%s",
+                idx,
+                len(items),
+                total_vectors,
+                len(pending_windows),
+                {k: round(v, 2) for k, v in timings.items()},
+                flush_count,
+            )
+
+    embeddings = np.concatenate(all_embeddings, axis=0).astype("float32")
     song_ids = np.asarray(all_song_ids, dtype=np.int64)
 
     if embeddings.ndim != 2 or len(embeddings) == 0:
         raise ValueError(f"Invalid eval embeddings shape: {embeddings.shape}")
+
+    if len(embeddings) != len(song_ids):
+        raise ValueError(
+            f"embeddings/song_ids mismatch: embeddings={len(embeddings)} song_ids={len(song_ids)}"
+        )
+
+    faiss.normalize_L2(embeddings)
 
     index = faiss.IndexFlatIP(embeddings.shape[1])
     index.add(embeddings)
@@ -166,6 +266,15 @@ def evaluate_prepared(
     windows_per_song = index_windows_override if index_windows_override is not None else INDEX_WINDOWS_PER_SONG
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(
+        "Evaluate device check cuda_available=%s device=%s gpu=%s",
+        torch.cuda.is_available(),
+        device,
+        torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+    )
+
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
     cache = PreparedAudioCache()
 
     model = AudioEncoder().to(device)

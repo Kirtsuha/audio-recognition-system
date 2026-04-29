@@ -10,7 +10,7 @@ from pipeline.config import INDEX_WINDOWS_PER_SONG
 from pipeline.dataset import extract_uniform_index_windows
 from pipeline.experiment_utils import set_experiment_seed
 from pipeline.manifest import load_prepared_manifest
-from pipeline.to_mel import to_mel
+from pipeline.to_mel import to_mel_batch
 
 logger = logging.getLogger("ml-pipeline.embed-build")
 
@@ -53,10 +53,15 @@ def build_embeddings_from_prepared(
         audio = np.load(row["prepared_path"]).astype("float32")
         windows = extract_uniform_index_windows(audio, n_windows=windows_per_song)
 
-        batch = torch.stack([to_mel(w) for w in windows]).to(device)
+        audio_batch = np.stack(windows).astype("float32")
 
         with torch.inference_mode():
-            embs = model(batch).cpu().numpy().astype("float32")
+            mel_batch = to_mel_batch(
+                audio_batch,
+                device=device,
+                normalize=True,
+            )
+            embs = model(mel_batch).cpu().numpy().astype("float32")
 
         for window_idx, emb in enumerate(embs):
             all_embeddings.append(emb)

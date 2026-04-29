@@ -59,7 +59,7 @@ MIN_SUPPORTED_WINDOWS=1
 
 # Train
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "24"))
-NUM_WORKERS = int(os.getenv("NUM_WORKERS", "0"))
+NUM_WORKERS = int(os.getenv("NUM_WORKERS", "4"))
 LR = float(os.getenv("LR", "1e-3"))
 EPOCHS = int(os.getenv("EPOCHS", "5"))
 MARGIN = float(os.getenv("MARGIN", "0.30"))

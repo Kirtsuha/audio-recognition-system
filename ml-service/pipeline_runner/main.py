@@ -316,21 +316,22 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
                 use_full_query_audio=payload.use_full_query_audio
             )
 
-        update_status(phase="build-embeddings")
-        embeddings_path = run_dir / "embeddings.npy"
-        song_ids_path = run_dir / "song_ids.npy"
-        manifest_path = run_dir / "song_manifest.json"
-        with log_stage(logger, "build-embeddings-from-prepared"):
-            build_embeddings_from_prepared(
-                model_path=model_path,
-                embeddings_out=embeddings_path,
-                song_ids_out=song_ids_path,
-                manifest_out=manifest_path,
-                train_limit=payload.train_limit,
-                val_limit=payload.val_limit,
-                test_limit=payload.test_limit,
-                index_windows_override=payload.index_windows_override,
-            )
+        if payload.build_artifacts:
+            update_status(phase="build-embeddings")
+            embeddings_path = run_dir / "embeddings.npy"
+            song_ids_path = run_dir / "song_ids.npy"
+            manifest_path = run_dir / "song_manifest.json"
+            with log_stage(logger, "build-embeddings-from-prepared"):
+                build_embeddings_from_prepared(
+                    model_path=model_path,
+                    embeddings_out=embeddings_path,
+                    song_ids_out=song_ids_path,
+                    manifest_out=manifest_path,
+                    train_limit=payload.train_limit,
+                    val_limit=payload.val_limit,
+                    test_limit=payload.test_limit,
+                    index_windows_override=payload.index_windows_override,
+                )
 
         update_status(phase="build-index")
         index_path = run_dir / "faiss.index"

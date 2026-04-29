@@ -44,3 +44,4 @@ class ExperimentRunRequest(BaseModel):
     use_full_query_audio: bool = False
 
     experiment_name: str = Field(default="experiment", min_length=1, max_length=100)
+    build_artifacts: bool = False

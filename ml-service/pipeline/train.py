@@ -3,6 +3,7 @@ import logging
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -10,7 +11,7 @@ from torch.utils.data import DataLoader
 from app.model import AudioEncoder
 from pipeline.config import MODEL_PATH, BATCH_SIZE, NUM_WORKERS, LR, EPOCHS, MARGIN
 from pipeline.dataset import pad_or_trim
-from pipeline.to_mel import to_mel
+from pipeline.to_mel import to_mel_batch
 from s3.s3_dataset import S3TripletDataset
 from s3.s3_list import list_all_songs
 
@@ -33,9 +34,9 @@ def collate_to_mel(batch):
     positives = [pad_or_trim(x) for x in positives]
     negatives = [pad_or_trim(x) for x in negatives]
 
-    a = torch.stack([to_mel(x) for x in anchors])
-    p = torch.stack([to_mel(x) for x in positives])
-    n = torch.stack([to_mel(x) for x in negatives])
+    a = torch.from_numpy(np.stack(anchors).astype("float32"))
+    p = torch.from_numpy(np.stack(positives).astype("float32"))
+    n = torch.from_numpy(np.stack(negatives).astype("float32"))
 
     return a, p, n
 
@@ -85,13 +86,17 @@ def train(bucket: str, prefix: str) -> None:
         logger.info("Epoch started epoch=%s/%s", epoch + 1, EPOCHS)
 
         for batch_idx, (a, p, n) in enumerate(loader, start=1):
-            a = a.to(device)
-            p = p.to(device)
-            n = n.to(device)
+            a = a.to(device, non_blocking=True)
+            p = p.to(device, non_blocking=True)
+            n = n.to(device, non_blocking=True)
 
-            emb_a = model(a)
-            emb_p = model(p)
-            emb_n = model(n)
+            a_mel = to_mel_batch(a, device=device, normalize=True)
+            p_mel = to_mel_batch(p, device=device, normalize=True)
+            n_mel = to_mel_batch(n, device=device, normalize=True)
+
+            emb_a = model(a_mel)
+            emb_p = model(p_mel)
+            emb_n = model(n_mel)
 
             loss = loss_fn(emb_a, emb_p, emb_n)
 
