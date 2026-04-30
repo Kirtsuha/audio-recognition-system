@@ -8,8 +8,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset
 
+import shutil
+import torch.nn.functional as F
+
 from app.model import AudioEncoder
-from pipeline.augment import augment_audio
+from pipeline.augment import augment_audio, augment_audio_strong_noisy
 from pipeline.config import (
     BATCH_SIZE,
     NUM_WORKERS,
@@ -19,6 +22,9 @@ from pipeline.config import (
     TRAIN_NEGATIVE_RETRIES,
     CACHE_PREPARED_IN_MEMORY,
     CACHE_PREPARED_MAX_TRACKS,
+    TRAIN_LOSS_TYPE,
+    INFONCE_TEMPERATURE,
+    SAVE_EPOCH_CHECKPOINTS, SR,
 )
 from pipeline.dataset import pad_or_trim, random_segment
 from pipeline.manifest import iter_prepared_manifest
@@ -35,6 +41,24 @@ class TripletLoss(nn.Module):
     def forward(self, anchor, positive, negative):
         return self.loss(anchor, positive, negative)
 
+class InfoNCELoss(nn.Module):
+    def __init__(self, temperature: float = INFONCE_TEMPERATURE):
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, anchors: torch.Tensor, positives: torch.Tensor) -> torch.Tensor:
+        anchors = F.normalize(anchors, dim=1)
+        positives = F.normalize(positives, dim=1)
+
+        logits_ap = anchors @ positives.T / self.temperature
+        logits_pa = positives @ anchors.T / self.temperature
+
+        labels = torch.arange(anchors.size(0), device=anchors.device)
+
+        loss_ap = F.cross_entropy(logits_ap, labels)
+        loss_pa = F.cross_entropy(logits_pa, labels)
+
+        return 0.5 * (loss_ap + loss_pa)
 
 class PreparedTripletDataset(Dataset):
     def __init__(
@@ -91,7 +115,32 @@ class PreparedTripletDataset(Dataset):
         anchor = pad_or_trim(random_segment(audio))
 
         positive = pad_or_trim(random_segment(audio))
+
+        if TRAIN_LOSS_TYPE == "infonce":
+            if random.random() < 0.50:
+                positive = augment_audio_strong_noisy(anchor.copy())
+            else:
+                positive = augment_audio(anchor.copy())
+
+            positive = pad_or_trim(positive)
+
+            if idx < 3:
+                logger.info(
+                    "Train sample lengths track_id=%s anchor_sec=%.2f positive_sec=%.2f anchor_samples=%s positive_samples=%s loss_type=%s",
+                    anchor_item["track_id"],
+                    len(anchor) / SR,
+                    len(positive) / SR,
+                    len(anchor),
+                    len(positive),
+                    TRAIN_LOSS_TYPE,
+                )
+
+            return anchor, positive, anchor
+
         positive = augment_audio(positive)
+
+        if idx < 3:
+            logger.info(...)
 
         negative_item = None
         for _ in range(TRAIN_NEGATIVE_RETRIES):
@@ -155,7 +204,13 @@ def train_prepared(
 
     model = AudioEncoder().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=LR)
-    loss_fn = TripletLoss()
+
+    if TRAIN_LOSS_TYPE == "triplet":
+        loss_fn = TripletLoss()
+    elif TRAIN_LOSS_TYPE == "infonce":
+        loss_fn = InfoNCELoss()
+    else:
+        raise ValueError(f"Unsupported TRAIN_LOSS_TYPE={TRAIN_LOSS_TYPE}")
 
     for epoch in range(epochs):
         epoch_started = time.time()
@@ -171,14 +226,26 @@ def train_prepared(
 
             a_mel = to_mel_batch(a, device=device, normalize=True)
             p_mel = to_mel_batch(p, device=device, normalize=True)
-            n_mel = to_mel_batch(n, device=device, normalize=True)
 
+            # with torch.autocast(
+            #         device_type="cuda",
+            #         dtype=torch.float16,
+            #         enabled=device.type == "cuda",
+            # ):
             emb_a = model(a_mel)
             emb_p = model(p_mel)
-            emb_n = model(n_mel)
 
-            loss = loss_fn(emb_a, emb_p, emb_n)
+            if TRAIN_LOSS_TYPE == "triplet":
+                n_mel = to_mel_batch(n, device=device, normalize=True)
+                emb_n = model(n_mel)
+                loss = loss_fn(emb_a, emb_p, emb_n)
+            else:
+                loss = loss_fn(emb_a, emb_p)
 
+            if not torch.isfinite(loss):
+                raise RuntimeError(
+                    f"Non-finite loss detected: {loss.item()} loss_type={TRAIN_LOSS_TYPE}"
+                )
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -204,6 +271,11 @@ def train_prepared(
             epoch_loss,
             time.time() - epoch_started,
         )
+
+        if SAVE_EPOCH_CHECKPOINTS:
+            epoch_path = Path(output_model_path).parent / f"model_epoch_{epoch + 1}.pt"
+            torch.save(model.state_dict(), epoch_path)
+            logger.info("Epoch checkpoint saved epoch=%s path=%s", epoch + 1, epoch_path)
 
     output_model_path = Path(output_model_path)
     output_model_path.parent.mkdir(parents=True, exist_ok=True)

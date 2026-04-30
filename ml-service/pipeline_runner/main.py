@@ -5,30 +5,24 @@ from pathlib import Path
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 
 from app.logging_utils import configure_logging, log_stage
+from evaluation.threshold_tuning import tune_thresholds
 from pipeline_runner.schemas import (
     AsyncJobResponse,
     PipelineRequest,
     ExperimentRunRequest,
-    EvalGenerateRequest,
-    EvalRunRequest,
-    ThresholdTuneRequest,
+    ThresholdTuneExperimentRequest,
+    FullRunRequest
 )
 from pipeline.build_embeddings_from_prepared import build_embeddings_from_prepared
 from pipeline.build_index import build_faiss_index
 from pipeline.incremental_sync import build_incremental_run
 from pipeline.config import RUNS_DIR
 from evaluation.evaluate_prepared import evaluate_prepared
+from evaluation.select_best_checkpoint import select_best_checkpoint
 from pipeline.job_status import get_status, reset_progress, update_status
 from pipeline.prepare_data import prepare_data
 from pipeline.promote import promote_run_to_active
 from pipeline.train_prepared import train_prepared
-
-# from evaluation.eval_dataset import generate_eval_dataset
-# from evaluation.eval_runner import run_evaluation
-# from evaluation.eval_metrics import build_eval_metrics
-# from evaluation.threshold_tuning import tune_thresholds
-# from evaluation.combined_eval_runner import run_combined_evaluation
-# from evaluation.combined_eval_metrics import build_combined_eval_metrics
 
 app = FastAPI(title="ML Pipeline Runner")
 configure_logging()
@@ -43,136 +37,8 @@ def make_run_dir(prefix: str) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
-# def run_generate_eval_dataset(payload: EvalGenerateRequest) -> None:
-#     global pipeline_in_progress
-#     if pipeline_in_progress:
-#         return
-#
-#     pipeline_in_progress = True
-#     update_status(
-#         current_job="generate-eval-dataset",
-#         phase="generate",
-#         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#         finished_at=None,
-#         last_error=None,
-#         progress={},
-#     )
-#     reset_progress()
-#
-#     try:
-#         with log_stage(logger, "generate-eval-dataset"):
-#             summary = generate_eval_dataset(
-#                 per_track_clean_queries=payload.per_track_clean_queries,
-#                 per_track_noisy_queries=payload.per_track_noisy_queries,
-#                 durations_sec=payload.durations_sec,
-#             )
-#
-#         update_status(
-#             phase="done",
-#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#             last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#             progress={"summary": summary},
-#         )
-#     except Exception as exc:
-#         update_status(
-#             phase="failed",
-#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#             last_error=str(exc),
-#         )
-#         logger.exception("Eval dataset generation failed")
-#     finally:
-#         pipeline_in_progress = False
 
-
-# def run_eval_pipeline(payload: EvalRunRequest) -> None:
-#     global pipeline_in_progress
-#     if pipeline_in_progress:
-#         return
-#
-#     pipeline_in_progress = True
-#     update_status(
-#         current_job="run-eval",
-#         phase="run",
-#         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#         finished_at=None,
-#         last_error=None,
-#         progress={},
-#     )
-#     reset_progress()
-#
-#     try:
-#         with log_stage(logger, "run-eval"):
-#             run_summary = run_evaluation(
-#                 warmup_queries=payload.warmup_queries,
-#                 limit=payload.limit,
-#             )
-#
-#         update_status(phase="metrics")
-#
-#         with log_stage(logger, "build-eval-metrics"):
-#             metrics_summary = build_eval_metrics()
-#
-#         update_status(
-#             phase="done",
-#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#             last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#             progress={
-#                 "run_summary": run_summary,
-#                 "metrics_summary": metrics_summary,
-#             },
-#         )
-#     except Exception as exc:
-#         update_status(
-#             phase="failed",
-#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#             last_error=str(exc),
-#         )
-#         logger.exception("Eval pipeline failed")
-#     finally:
-#         pipeline_in_progress = False
-#
-#
-# def run_threshold_tuning(payload: ThresholdTuneRequest) -> None:
-#     global pipeline_in_progress
-#     if pipeline_in_progress:
-#         return
-#
-#     pipeline_in_progress = True
-#     update_status(
-#         current_job="tune-thresholds",
-#         phase="tune",
-#         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#         finished_at=None,
-#         last_error=None,
-#         progress={},
-#     )
-#     reset_progress()
-#
-#     try:
-#         with log_stage(logger, "tune-thresholds"):
-#             summary = tune_thresholds(
-#                 confidence_values=payload.confidence_values,
-#                 margin_values=payload.margin_values,
-#                 support_values=payload.support_values,
-#             )
-#
-#         update_status(
-#             phase="done",
-#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#             last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#             progress={"summary": summary},
-#         )
-#     except Exception as exc:
-#         update_status(
-#             phase="failed",
-#             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-#             last_error=str(exc),
-#         )
-#         logger.exception("Threshold tuning failed")
-#     finally:
-#         pipeline_in_progress = False
-
-def run_full_pipeline(bucket: str, prefix: str) -> None:
+def run_full_pipeline(payload: FullRunRequest) -> None:
     global pipeline_in_progress
     if pipeline_in_progress:
         return
@@ -186,42 +52,99 @@ def run_full_pipeline(bucket: str, prefix: str) -> None:
         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         finished_at=None,
         last_error=None,
-        progress={"run_dir": str(run_dir)},
+        progress={
+            "run_dir": str(run_dir),
+            "train_limit": payload.train_limit,
+            "val_limit": payload.val_limit,
+            "test_limit": payload.test_limit,
+            "prepare_limit": payload.prepare_limit,
+            "index_windows_override": payload.index_windows_override,
+            "aggregation_strategies": payload.aggregation_strategies,
+        },
     )
     reset_progress()
 
     try:
-        with log_stage(logger, "prepare-data", bucket=bucket, prefix=prefix):
-            prepare_summary = prepare_data(bucket=bucket, prefix=prefix, append=False)
+        with log_stage(logger, "prepare-data", bucket=payload.bucket, prefix=payload.prefix):
+            if payload.skip_prepare:
+                prepare_summary = {"skipped": True}
+                logger.info("Prepare-data skipped by request")
+            else:
+                prepare_summary = prepare_data(
+                    bucket=payload.bucket,
+                    prefix=payload.prefix,
+                    append=False,
+                    prepare_limit=payload.prepare_limit,
+                )
 
         update_status(phase="train")
         model_path = run_dir / "model.pt"
+
         with log_stage(logger, "train-prepared", model_path=str(model_path)):
-            train_prepared(output_model_path=model_path)
+            train_prepared(
+                output_model_path=model_path,
+                train_limit=payload.train_limit,
+                epochs_override=payload.epochs_override,
+            )
+
+        update_status(phase="select-best-checkpoint")
+
+        with log_stage(logger, "select-best-checkpoint", run_dir=str(run_dir)):
+            best_summary = select_best_checkpoint(
+                run_dir=run_dir,
+                train_limit=payload.train_limit,
+                val_limit=payload.val_limit,
+                test_limit=payload.test_limit,
+                eval_query_limit=payload.eval_query_limit,
+                index_windows_override=payload.index_windows_override or 96,
+                use_full_query_audio=payload.use_full_query_audio,
+                fixed_eval_set_name=payload.fixed_eval_set_name,
+                eval_noise_mode="noisy",  # КЛЮЧЕВОЕ
+                metric_name="recall_at_1",
+            )
+
+        model_path = run_dir / "model_best.pt"
 
         update_status(phase="evaluate")
         metrics_path = run_dir / "metrics.json"
+        eval_results_path = run_dir / "eval_results.jsonl"
+
         with log_stage(logger, "evaluate-prepared", metrics_path=str(metrics_path)):
-            evaluate_prepared(
+            metrics = evaluate_prepared(
                 model_path=model_path,
                 output_metrics_path=metrics_path,
-                use_full_query_audio=True,
+                train_limit=payload.train_limit,
+                val_limit=payload.val_limit,
+                test_limit=payload.test_limit,
+                eval_query_limit=payload.eval_query_limit,
+                index_windows_override=payload.index_windows_override,
+                use_full_query_audio=payload.use_full_query_audio,
+                fixed_eval_set_name=payload.fixed_eval_set_name,
+                eval_noise_mode=payload.eval_noise_mode,
+                results_jsonl_path=eval_results_path,
+                aggregation_strategies=payload.aggregation_strategies,
             )
 
         update_status(phase="build-embeddings")
         embeddings_path = run_dir / "embeddings.npy"
         song_ids_path = run_dir / "song_ids.npy"
         manifest_path = run_dir / "song_manifest.json"
+
         with log_stage(logger, "build-embeddings-from-prepared"):
-            build_embeddings_from_prepared(
+            embed_summary = build_embeddings_from_prepared(
                 model_path=model_path,
                 embeddings_out=embeddings_path,
                 song_ids_out=song_ids_path,
                 manifest_out=manifest_path,
+                train_limit=payload.train_limit,
+                val_limit=payload.val_limit,
+                test_limit=payload.test_limit,
+                index_windows_override=payload.index_windows_override,
             )
 
         update_status(phase="build-index")
         index_path = run_dir / "faiss.index"
+
         with log_stage(logger, "build-faiss-index"):
             build_faiss_index(
                 embeddings_path=embeddings_path,
@@ -229,16 +152,32 @@ def run_full_pipeline(bucket: str, prefix: str) -> None:
                 index_out_path=index_path,
             )
 
-        update_status(phase="promote")
-        with log_stage(logger, "promote-active", run_dir=str(run_dir)):
-            promote_run_to_active(run_dir)
+        promoted = False
+
+        if payload.promote:
+            update_status(phase="promote")
+            with log_stage(logger, "promote-active", run_dir=str(run_dir)):
+                promote_run_to_active(run_dir)
+            promoted = True
 
         update_status(
             phase="done",
             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            progress={"run_dir": str(run_dir), "prepare_summary": prepare_summary},
+            progress={
+                "run_dir": str(run_dir),
+                "prepare_summary": prepare_summary,
+                "metrics": metrics,
+                "embed_summary": embed_summary,
+                "promoted": promoted,
+                "train_limit": payload.train_limit,
+                "val_limit": payload.val_limit,
+                "test_limit": payload.test_limit,
+                "index_windows_override": payload.index_windows_override,
+                "aggregation_strategies": payload.aggregation_strategies,
+            },
         )
+
     except Exception as exc:
         update_status(
             phase="failed",
@@ -302,8 +241,30 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
                 epochs_override=payload.epochs_override,
             )
 
+        if payload.select_best_checkpoint:
+            update_status(phase="select-best-checkpoint")
+
+            with log_stage(logger, "select-best-checkpoint", run_dir=str(run_dir)):
+                best_summary = select_best_checkpoint(
+                    run_dir=run_dir,
+                    train_limit=payload.train_limit,
+                    val_limit=payload.val_limit,
+                    test_limit=payload.test_limit,
+                    eval_query_limit=payload.eval_query_limit,
+                    index_windows_override=payload.index_windows_override or 64,
+                    use_full_query_audio=payload.use_full_query_audio,
+                    fixed_eval_set_name=payload.fixed_eval_set_name,
+                    eval_noise_mode=payload.best_checkpoint_eval_noise_mode,
+                    metric_name=payload.best_checkpoint_metric,
+                )
+
+            model_path = run_dir / "model_best.pt"
+        else:
+            best_summary = None
+
         update_status(phase="evaluate")
         metrics_path = run_dir / "metrics.json"
+        eval_results_path = run_dir / "eval_results.jsonl"
         with log_stage(logger, "evaluate-prepared", metrics_path=str(metrics_path)):
             evaluate_prepared(
                 model_path=model_path,
@@ -313,7 +274,11 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
                 test_limit=payload.test_limit,
                 eval_query_limit=payload.eval_query_limit,
                 index_windows_override=payload.index_windows_override,
-                use_full_query_audio=payload.use_full_query_audio
+                use_full_query_audio=payload.use_full_query_audio,
+                fixed_eval_set_name=payload.fixed_eval_set_name,
+                eval_noise_mode=payload.eval_noise_mode,
+                results_jsonl_path=eval_results_path,
+                aggregation_strategies=payload.aggregation_strategies,
             )
 
         if payload.build_artifacts:
@@ -321,6 +286,7 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
             embeddings_path = run_dir / "embeddings.npy"
             song_ids_path = run_dir / "song_ids.npy"
             manifest_path = run_dir / "song_manifest.json"
+
             with log_stage(logger, "build-embeddings-from-prepared"):
                 build_embeddings_from_prepared(
                     model_path=model_path,
@@ -333,14 +299,15 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
                     index_windows_override=payload.index_windows_override,
                 )
 
-        update_status(phase="build-index")
-        index_path = run_dir / "faiss.index"
-        with log_stage(logger, "build-faiss-index"):
-            build_faiss_index(
-                embeddings_path=embeddings_path,
-                song_ids_path=song_ids_path,
-                index_out_path=index_path,
-            )
+            update_status(phase="build-index")
+            index_path = run_dir / "faiss.index"
+
+            with log_stage(logger, "build-faiss-index"):
+                build_faiss_index(
+                    embeddings_path=embeddings_path,
+                    song_ids_path=song_ids_path,
+                    index_out_path=index_path,
+                )
 
         # Для experiment-run не промоутим в active автоматически
         update_status(
@@ -360,6 +327,7 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
                 "promoted": False,
                 "prepare_limit": payload.prepare_limit,
                 "skip_prepare": payload.skip_prepare,
+                "best_summary": best_summary,
             },
         )
     except Exception as exc:
@@ -429,12 +397,17 @@ def run_incremental_pipeline(bucket: str, prefix: str) -> None:
 
 
 @app.post("/pipeline/full-run", response_model=AsyncJobResponse)
-async def full_run(payload: PipelineRequest, background_tasks: BackgroundTasks):
+async def full_run(payload: FullRunRequest, background_tasks: BackgroundTasks):
     if pipeline_in_progress:
         raise HTTPException(status_code=409, detail="Pipeline job is already running")
 
-    background_tasks.add_task(run_full_pipeline, payload.bucket, payload.prefix)
-    return AsyncJobResponse(accepted=True, status="scheduled", bucket=payload.bucket, prefix=payload.prefix)
+    background_tasks.add_task(run_full_pipeline, payload)
+    return AsyncJobResponse(
+        accepted=True,
+        status="scheduled",
+        bucket=payload.bucket,
+        prefix=payload.prefix,
+    )
 
 
 @app.post("/pipeline/experiment-run", response_model=AsyncJobResponse)
@@ -462,64 +435,39 @@ async def pipeline_status():
         "job_status": get_status(),
     }
 
+@app.post("/pipeline/experiment/tune-thresholds")
+async def tune_experiment_thresholds(payload: ThresholdTuneExperimentRequest):
+    run_dir = Path(payload.run_dir)
 
-# @app.post("/evaluation/generate-set", response_model=AsyncJobResponse)
-# async def evaluation_generate_set(payload: EvalGenerateRequest, background_tasks: BackgroundTasks):
-#     if pipeline_in_progress:
-#         raise HTTPException(status_code=409, detail="Pipeline job is already running")
-#
-#     background_tasks.add_task(run_generate_eval_dataset, payload)
-#     return AsyncJobResponse(accepted=True, status="scheduled", bucket="", prefix="")
-#
-#
-# @app.post("/evaluation/run", response_model=AsyncJobResponse)
-# async def evaluation_run(payload: EvalRunRequest, background_tasks: BackgroundTasks):
-#     if pipeline_in_progress:
-#         raise HTTPException(status_code=409, detail="Pipeline job is already running")
-#
-#     background_tasks.add_task(run_eval_pipeline, payload)
-#     return AsyncJobResponse(accepted=True, status="scheduled", bucket="", prefix="")
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail=f"run_dir does not exist: {run_dir}")
 
-# @app.post("/evaluation/combined/run")
-# def combined_eval_run_endpoint(
-#     limit: int | None = Query(default=None, ge=1),
-#     fingerprint_timeout_sec: float = Query(default=60.0, ge=1.0),
-# ):
-#     return run_combined_evaluation(
-#         limit=limit,
-#         fingerprint_timeout_sec=fingerprint_timeout_sec,
-#     )
-#
-#
-# @app.post("/evaluation/combined/metrics")
-# def combined_eval_metrics_endpoint():
-#     return build_combined_eval_metrics()
-#
-#
-# @app.post("/evaluation/combined/run-all")
-# def combined_eval_run_all_endpoint(
-#     limit: int | None = Query(default=None, ge=1),
-#     fingerprint_timeout_sec: float = Query(default=60.0, ge=1.0),
-# ):
-#     run_summary = run_combined_evaluation(
-#         limit=limit,
-#         fingerprint_timeout_sec=fingerprint_timeout_sec,
-#     )
-#
-#     metrics = build_combined_eval_metrics()
-#
-#     return {
-#         "run": run_summary,
-#         "metrics": metrics,
-#     }
-#
-# @app.post("/evaluation/tune-thresholds", response_model=AsyncJobResponse)
-# async def evaluation_tune_thresholds(payload: ThresholdTuneRequest, background_tasks: BackgroundTasks):
-#     if pipeline_in_progress:
-#         raise HTTPException(status_code=409, detail="Pipeline job is already running")
-#
-#     background_tasks.add_task(run_threshold_tuning, payload)
-#     return AsyncJobResponse(accepted=True, status="scheduled", bucket="", prefix="")
+    results_path = run_dir / payload.results_filename
+
+    if not results_path.exists():
+        raise HTTPException(status_code=404, detail=f"eval results not found: {results_path}")
+
+    output_path = run_dir / "threshold_tuning.json"
+
+    try:
+        summary = tune_thresholds(
+            confidence_values=payload.confidence_values,
+            margin_values=payload.margin_values,
+            support_values=payload.support_values,
+            results_path=str(results_path),
+            output_path=str(output_path),
+            case=payload.case,
+            aggregation_strategy=payload.aggregation_strategy,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {
+        "run_dir": str(run_dir),
+        "results_path": str(results_path),
+        "output_path": str(output_path),
+        "summary": summary,
+    }
 
 @app.get("/health")
 async def health():

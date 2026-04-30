@@ -22,6 +22,7 @@ EVAL_QUERIES_PATH = Path(os.getenv("EVAL_QUERIES_PATH", str(EVAL_DIR / "eval_que
 EVAL_RESULTS_PATH = Path(os.getenv("EVAL_RESULTS_PATH", str(EVAL_DIR / "eval_results.jsonl")))
 EVAL_METRICS_PATH = Path(os.getenv("EVAL_METRICS_PATH", str(EVAL_DIR / "eval_metrics.json")))
 THRESHOLD_TUNING_PATH = Path(os.getenv("THRESHOLD_TUNING_PATH", str(EVAL_DIR / "threshold_tuning.json")))
+FIXED_EVAL_DIR = Path(os.getenv("FIXED_EVAL_DIR", str(EVAL_DIR / "fixed_sets")))
 
 # Prepared dataset
 PREPARED_DATA_DIR = Path(os.getenv("PREPARED_DATA_DIR", "/app/prepared-data"))
@@ -47,7 +48,8 @@ FMAX = float(os.getenv("FMAX", str(SR // 2)))
 # Embeddings / Index
 EMB_DIM = int(os.getenv("EMB_DIM", "128"))
 FAISS_TOP_K = int(os.getenv("FAISS_TOP_K", "15"))
-INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "64"))
+INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "96"))
+AGGREGATION_STRATEGY = os.getenv("AGGREGATION_STRATEGY", "max")
 
 # Acceptance thresholds
 # MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.58"))
@@ -64,6 +66,9 @@ LR = float(os.getenv("LR", "1e-3"))
 EPOCHS = int(os.getenv("EPOCHS", "5"))
 MARGIN = float(os.getenv("MARGIN", "0.30"))
 TRAIN_NEGATIVE_RETRIES = int(os.getenv("TRAIN_NEGATIVE_RETRIES", "10"))
+TRAIN_LOSS_TYPE = os.getenv("TRAIN_LOSS_TYPE", "infonce")  # triplet | infonce
+INFONCE_TEMPERATURE = float(os.getenv("INFONCE_TEMPERATURE", "0.05"))
+SAVE_EPOCH_CHECKPOINTS = os.getenv("SAVE_EPOCH_CHECKPOINTS", "true").lower() == "true"
 
 # Experiment defaults
 EXPERIMENT_RANDOM_SEED = int(os.getenv("EXPERIMENT_RANDOM_SEED", "42"))

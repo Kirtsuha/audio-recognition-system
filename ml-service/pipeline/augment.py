@@ -90,3 +90,29 @@ def augment_audio(audio: np.ndarray, fast_mode: bool = FAST_AUGMENT) -> np.ndarr
 
     out = normalize_peak(out)
     return out.astype(np.float32)
+
+def augment_audio_strong_noisy(audio: np.ndarray) -> np.ndarray:
+    out = audio.astype(np.float32).copy()
+
+    # почти всегда меняем громкость
+    if random.random() < 0.95:
+        out = random_gain(out, min_db=-14.0, max_db=10.0)
+
+    # почти всегда добавляем шум, иногда очень сильный
+    if random.random() < 0.95:
+        out = add_gaussian_noise(out, snr_db_min=-2.0, snr_db_max=18.0)
+
+    # чаще клиппинг
+    if random.random() < 0.45:
+        out = random_clipping(out, min_clip=0.45, max_clip=0.90)
+
+    # чаще реверберация
+    if random.random() < 0.45:
+        out = simple_reverb(out)
+
+    # иногда вторичный шум после искажений
+    if random.random() < 0.25:
+        out = add_gaussian_noise(out, snr_db_min=5.0, snr_db_max=20.0)
+
+    out = normalize_peak(out)
+    return out.astype(np.float32)

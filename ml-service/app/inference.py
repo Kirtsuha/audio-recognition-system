@@ -8,17 +8,21 @@ def aggregate_results(
     scores: np.ndarray,
     indices: np.ndarray,
     song_ids: np.ndarray,
+    strategy: str = "current",
+    support_score_threshold: float = 0.50,
 ) -> dict[str, Any] | None:
     if scores.size == 0 or indices.size == 0:
         return None
 
     stats: dict[int, dict[str, Any]] = defaultdict(
         lambda: {
+            "scores": [],
             "sum_score": 0.0,
             "max_score": float("-inf"),
             "hit_count": 0,
             "supported_queries": set(),
             "rank_bonus": 0.0,
+            "support_above_threshold": 0,
         }
     )
 
@@ -29,40 +33,99 @@ def aggregate_results(
             if emb_idx < 0:
                 continue
 
+            score = float(score)
             song_id = int(song_ids[emb_idx])
             rank_weight = 1.0 / rank
 
-            stats[song_id]["sum_score"] += float(score)
-            stats[song_id]["max_score"] = max(stats[song_id]["max_score"], float(score))
-            stats[song_id]["hit_count"] += 1
-            stats[song_id]["supported_queries"].add(q_idx)
-            stats[song_id]["rank_bonus"] += rank_weight
+            item = stats[song_id]
+            item["scores"].append(score)
+            item["sum_score"] += score
+            item["max_score"] = max(item["max_score"], score)
+            item["hit_count"] += 1
+            item["supported_queries"].add(q_idx)
+            item["rank_bonus"] += rank_weight
+
+            if score >= support_score_threshold:
+                item["support_above_threshold"] += 1
 
     if not stats:
         return None
 
     candidates = []
+
     for song_id, item in stats.items():
         support = len(item["supported_queries"])
         support_ratio = support / max(num_queries, 1)
+        scores_list = sorted(item["scores"], reverse=True)
 
-        final_score = (
-            item["sum_score"]
-            + 0.35 * item["rank_bonus"]
-            + 0.30 * support
-            + 0.15 * item["max_score"]
-            + 0.20 * support_ratio
-        )
+        top3_avg = float(np.mean(scores_list[:3])) if scores_list else 0.0
+        top5_avg = float(np.mean(scores_list[:5])) if scores_list else 0.0
+
+        if strategy == "current":
+            final_score = (
+                item["sum_score"]
+                + 0.35 * item["rank_bonus"]
+                + 0.30 * support
+                + 0.15 * item["max_score"]
+                + 0.20 * support_ratio
+            )
+
+        elif strategy == "max":
+            final_score = item["max_score"]
+
+        elif strategy == "top3_avg":
+            final_score = top3_avg
+
+        elif strategy == "top5_avg":
+            final_score = top5_avg
+
+        elif strategy == "sum":
+            final_score = item["sum_score"]
+
+        elif strategy == "rank_bonus":
+            final_score = item["rank_bonus"]
+
+        elif strategy == "support":
+            final_score = support
+
+        elif strategy == "support_threshold":
+            final_score = (
+                item["support_above_threshold"]
+                + 0.10 * item["max_score"]
+                + 0.05 * item["rank_bonus"]
+            )
+
+        elif strategy == "support_then_max":
+            final_score = (
+                support * 10.0
+                + item["max_score"]
+                + 0.01 * item["rank_bonus"]
+            )
+
+        elif strategy == "hybrid_v2":
+            final_score = (
+                1.50 * top3_avg
+                + 0.80 * item["max_score"]
+                + 0.50 * support
+                + 0.20 * item["rank_bonus"]
+                + 0.30 * support_ratio
+            )
+
+        else:
+            raise ValueError(f"Unsupported aggregation strategy={strategy}")
 
         candidates.append(
             {
-                "song_id": song_id,
+                "song_id": int(song_id),
                 "final_score": float(final_score),
                 "sum_score": float(item["sum_score"]),
                 "max_score": float(item["max_score"]),
+                "top3_avg": float(top3_avg),
+                "top5_avg": float(top5_avg),
                 "hit_count": int(item["hit_count"]),
                 "support": int(support),
                 "support_ratio": float(support_ratio),
+                "support_above_threshold": int(item["support_above_threshold"]),
             }
         )
 
@@ -83,4 +146,5 @@ def aggregate_results(
         "support": int(top1["support"]),
         "support_ratio": float(top1["support_ratio"]),
         "top_candidates": candidates[:5],
+        "aggregation_strategy": strategy,
     }

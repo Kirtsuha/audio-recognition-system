@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from app.model import AudioEncoder
-from pipeline.config import INDEX_WINDOWS_PER_SONG
+from pipeline.config import INDEX_WINDOWS_PER_SONG, SR
 from pipeline.dataset import extract_uniform_index_windows
 from pipeline.experiment_utils import set_experiment_seed
 from pipeline.manifest import load_prepared_manifest
@@ -52,6 +52,15 @@ def build_embeddings_from_prepared(
     for idx, row in enumerate(items, start=1):
         audio = np.load(row["prepared_path"]).astype("float32")
         windows = extract_uniform_index_windows(audio, n_windows=windows_per_song)
+
+        if idx <= 5:
+            logger.info(
+                "Eval index item track_id=%s audio_sec=%.2f index_windows=%s window_sec=%.2f",
+                row["track_id"],
+                len(audio) / SR,
+                len(windows),
+                len(windows[0]) / SR if windows else 0.0,
+            )
 
         audio_batch = np.stack(windows).astype("float32")
 

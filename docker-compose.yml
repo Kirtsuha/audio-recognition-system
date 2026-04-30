@@ -105,6 +105,10 @@ services:
       S3_BUCKET: tracks
       S3_PREFIX: fma/
       HF_TOKEN: ${HF_TOKEN}
+      FP_INDEX_WORKERS: 4
+      FP_FAST_REINDEX_MODE: "false"
+      FP_INSERT_BATCH_SIZE: 10000
+      FP_INDEX_PROGRESS_EVERY: 25
     ports:
       - "8000:8000"
 
