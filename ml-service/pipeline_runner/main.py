@@ -11,7 +11,7 @@ from pipeline_runner.schemas import (
     PipelineRequest,
     ExperimentRunRequest,
     ThresholdTuneExperimentRequest,
-    FullRunRequest
+    FullRunRequest, EvaluateExistingModelRequest, BuildArtifactsRequest
 )
 from pipeline.build_embeddings_from_prepared import build_embeddings_from_prepared
 from pipeline.build_index import build_faiss_index
@@ -144,12 +144,14 @@ def run_full_pipeline(payload: FullRunRequest) -> None:
 
         update_status(phase="build-index")
         index_path = run_dir / "faiss.index"
+        index_meta_path = run_dir / "faiss_meta.json"
 
         with log_stage(logger, "build-faiss-index"):
-            build_faiss_index(
+            index_summary = build_faiss_index(
                 embeddings_path=embeddings_path,
                 song_ids_path=song_ids_path,
                 index_out_path=index_path,
+                meta_out_path=index_meta_path,
             )
 
         promoted = False
@@ -175,6 +177,7 @@ def run_full_pipeline(payload: FullRunRequest) -> None:
                 "test_limit": payload.test_limit,
                 "index_windows_override": payload.index_windows_override,
                 "aggregation_strategies": payload.aggregation_strategies,
+                "index_summary": index_summary,
             },
         )
 
@@ -301,12 +304,14 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
 
             update_status(phase="build-index")
             index_path = run_dir / "faiss.index"
+            index_meta_path = run_dir / "faiss_meta.json"
 
             with log_stage(logger, "build-faiss-index"):
-                build_faiss_index(
+                index_summary = build_faiss_index(
                     embeddings_path=embeddings_path,
                     song_ids_path=song_ids_path,
                     index_out_path=index_path,
+                    meta_out_path=index_meta_path,
                 )
 
         # Для experiment-run не промоутим в active автоматически
@@ -328,6 +333,7 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
                 "prepare_limit": payload.prepare_limit,
                 "skip_prepare": payload.skip_prepare,
                 "best_summary": best_summary,
+                "index_summary": index_summary,
             },
         )
     except Exception as exc:
@@ -468,6 +474,179 @@ async def tune_experiment_thresholds(payload: ThresholdTuneExperimentRequest):
         "output_path": str(output_path),
         "summary": summary,
     }
+
+@app.post("/pipeline/evaluate-model")
+async def evaluate_existing_model(payload: EvaluateExistingModelRequest):
+    model_path = Path(payload.model_path)
+
+    if not model_path.exists():
+        raise HTTPException(status_code=404, detail=f"model_path does not exist: {model_path}")
+
+    run_dir = model_path.parent
+    output_metrics_path = (
+        Path(payload.output_metrics_path)
+        if payload.output_metrics_path
+        else run_dir / f"metrics_{model_path.stem}.json"
+    )
+    eval_results_path = run_dir / f"eval_results_{model_path.stem}.jsonl"
+
+    try:
+        metrics = evaluate_prepared(
+            model_path=model_path,
+            output_metrics_path=output_metrics_path,
+            train_limit=payload.train_limit,
+            val_limit=payload.val_limit,
+            test_limit=payload.test_limit,
+            eval_query_limit=payload.eval_query_limit,
+            index_windows_override=payload.index_windows_override,
+            use_full_query_audio=payload.use_full_query_audio,
+            fixed_eval_set_name=payload.fixed_eval_set_name,
+            eval_noise_mode=payload.eval_noise_mode,
+            results_jsonl_path=eval_results_path,
+            aggregation_strategies=payload.aggregation_strategies,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {
+        "model_path": str(model_path),
+        "output_metrics_path": str(output_metrics_path),
+        "eval_results_path": str(eval_results_path),
+        "metrics": metrics,
+    }
+
+def run_build_artifacts(payload: BuildArtifactsRequest) -> None:
+    global pipeline_in_progress
+    if pipeline_in_progress:
+        return
+
+    pipeline_in_progress = True
+
+    run_dir = Path(payload.run_dir)
+    model_path = run_dir / payload.model_filename
+
+    update_status(
+        current_job="build-artifacts",
+        phase="validate",
+        started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        finished_at=None,
+        last_error=None,
+        progress={
+            "run_dir": str(run_dir),
+            "model_path": str(model_path),
+            "index_windows_override": payload.index_windows_override,
+            "promote": payload.promote,
+        },
+    )
+    reset_progress()
+
+    try:
+        if not run_dir.exists():
+            raise FileNotFoundError(f"run_dir does not exist: {run_dir}")
+
+        if not model_path.exists():
+            raise FileNotFoundError(f"model checkpoint does not exist: {model_path}")
+
+        update_status(phase="copy-model")
+        final_model_path = run_dir / "model.pt"
+
+        if model_path.resolve() != final_model_path.resolve():
+            import shutil
+            shutil.copy2(model_path, final_model_path)
+
+        update_status(phase="build-embeddings")
+
+        embeddings_path = run_dir / "embeddings.npy"
+        song_ids_path = run_dir / "song_ids.npy"
+        manifest_path = run_dir / "song_manifest.json"
+
+        with log_stage(logger, "build-embeddings-from-checkpoint", model_path=str(final_model_path)):
+            embed_summary = build_embeddings_from_prepared(
+                model_path=final_model_path,
+                embeddings_out=embeddings_path,
+                song_ids_out=song_ids_path,
+                manifest_out=manifest_path,
+                train_limit=payload.train_limit,
+                val_limit=payload.val_limit,
+                test_limit=payload.test_limit,
+                index_windows_override=payload.index_windows_override,
+            )
+
+        update_status(phase="build-index")
+
+        index_path = run_dir / "faiss.index"
+        index_meta_path = run_dir / "faiss_meta.json"
+
+        with log_stage(logger, "build-faiss-index"):
+            index_summary = build_faiss_index(
+                embeddings_path=embeddings_path,
+                song_ids_path=song_ids_path,
+                index_out_path=index_path,
+                meta_out_path=index_meta_path,
+            )
+
+        metrics_path = run_dir / payload.metrics_filename
+        final_metrics_path = run_dir / "metrics.json"
+
+        if metrics_path.exists() and metrics_path.resolve() != final_metrics_path.resolve():
+            import shutil
+            shutil.copy2(metrics_path, final_metrics_path)
+
+        promoted = False
+
+        if payload.promote:
+            update_status(phase="promote")
+
+            with log_stage(logger, "promote-active", run_dir=str(run_dir)):
+                promote_run_to_active(run_dir)
+
+            promoted = True
+
+        update_status(
+            phase="done",
+            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            progress={
+                "run_dir": str(run_dir),
+                "model_path": str(final_model_path),
+                "embeddings_path": str(embeddings_path),
+                "song_ids_path": str(song_ids_path),
+                "manifest_path": str(manifest_path),
+                "index_path": str(index_path),
+                "embed_summary": embed_summary,
+                "promoted": promoted,
+                "index_summary": index_summary,
+            },
+        )
+
+    except Exception as exc:
+        update_status(
+            phase="failed",
+            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            last_error=str(exc),
+            progress={
+                "run_dir": str(run_dir),
+                "model_path": str(model_path),
+            },
+        )
+        logger.exception("Build artifacts failed")
+
+    finally:
+        pipeline_in_progress = False
+
+@app.post("/pipeline/build-artifacts", response_model=AsyncJobResponse)
+async def build_artifacts_endpoint(payload: BuildArtifactsRequest, background_tasks: BackgroundTasks):
+    if pipeline_in_progress:
+        raise HTTPException(status_code=409, detail="Pipeline job is already running")
+
+    background_tasks.add_task(run_build_artifacts, payload)
+
+    return AsyncJobResponse(
+        accepted=True,
+        status="scheduled",
+        bucket="",
+        prefix="",
+    )
 
 @app.get("/health")
 async def health():

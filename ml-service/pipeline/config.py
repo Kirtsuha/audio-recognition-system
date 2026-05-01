@@ -49,7 +49,14 @@ FMAX = float(os.getenv("FMAX", str(SR // 2)))
 EMB_DIM = int(os.getenv("EMB_DIM", "128"))
 FAISS_TOP_K = int(os.getenv("FAISS_TOP_K", "15"))
 INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "96"))
-AGGREGATION_STRATEGY = os.getenv("AGGREGATION_STRATEGY", "max")
+FAISS_INDEX_TYPE = os.getenv("FAISS_INDEX_TYPE", "ivf_flat")  # flat | ivf_flat
+FAISS_NLIST = int(os.getenv("FAISS_NLIST", "4096"))
+FAISS_NPROBE = int(os.getenv("FAISS_NPROBE", "32"))
+FAISS_INDEX_META_PATH = Path(
+    os.getenv("FAISS_INDEX_META_PATH", str(ACTIVE_ARTIFACTS_DIR / "faiss_meta.json"))
+)
+
+AGGREGATION_STRATEGY = os.getenv("AGGREGATION_STRATEGY", "support") # potentially change to max
 
 # Acceptance thresholds
 # MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.58"))

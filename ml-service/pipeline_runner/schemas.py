@@ -77,3 +77,34 @@ class FullRunRequest(BaseModel):
     aggregation_strategies: list[str] = Field(default_factory=lambda: ["max"])
 
     promote: bool = True
+
+class EvaluateExistingModelRequest(BaseModel):
+    model_path: str
+    output_metrics_path: str | None = None
+
+    train_limit: int = Field(default=8000, ge=0)
+    val_limit: int = Field(default=1000, ge=0)
+    test_limit: int = Field(default=1000, ge=0)
+
+    eval_query_limit: int = Field(default=500, ge=0)
+    index_windows_override: int = Field(default=96, ge=1, le=256)
+    use_full_query_audio: bool = False
+
+    fixed_eval_set_name: str = "prod_val500_v1"
+    eval_noise_mode: str = "noisy"
+    aggregation_strategies: list[str] = Field(
+        default_factory=lambda: ["max", "support", "hybrid_v2", "current"]
+    )
+
+class BuildArtifactsRequest(BaseModel):
+    run_dir: str
+    model_filename: str = "model.pt"
+
+    train_limit: int = Field(default=0, ge=0)
+    val_limit: int = Field(default=0, ge=0)
+    test_limit: int = Field(default=0, ge=0)
+
+    index_windows_override: int | None = Field(default=96, ge=1, le=256)
+
+    metrics_filename: str = "metrics.json"
+    promote: bool = False
