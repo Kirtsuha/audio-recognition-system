@@ -12,7 +12,8 @@ import shutil
 import torch.nn.functional as F
 
 from app.model import AudioEncoder
-from pipeline.augment import augment_audio, augment_audio_strong_noisy
+from pipeline.augment import augment_audio, augment_audio_strong_noisy, augment_audio_phone_noisy, \
+    augment_audio_phone_mild, augment_audio_phone_medium, augment_audio_phone_hard
 from pipeline.config import (
     BATCH_SIZE,
     NUM_WORKERS,
@@ -24,7 +25,8 @@ from pipeline.config import (
     CACHE_PREPARED_MAX_TRACKS,
     TRAIN_LOSS_TYPE,
     INFONCE_TEMPERATURE,
-    SAVE_EPOCH_CHECKPOINTS, SR,
+    SAVE_EPOCH_CHECKPOINTS, SR, INFONCE_AUG_LIGHT_PROB, INFONCE_AUG_STRONG_PROB, INFONCE_AUG_PHONE_MILD_PROB,
+    INFONCE_AUG_PHONE_MEDIUM_PROB, INFONCE_AUG_PHONE_HARD_PROB,
 )
 from pipeline.dataset import pad_or_trim, random_segment
 from pipeline.manifest import iter_prepared_manifest
@@ -32,6 +34,41 @@ from pipeline.to_mel import to_mel_batch
 
 logger = logging.getLogger("ml-pipeline.train")
 
+
+def choose_infonce_positive_augmentation(anchor: np.ndarray) -> tuple[np.ndarray, str]:
+    total = (
+        INFONCE_AUG_LIGHT_PROB
+        + INFONCE_AUG_STRONG_PROB
+        + INFONCE_AUG_PHONE_MILD_PROB
+        + INFONCE_AUG_PHONE_MEDIUM_PROB
+        + INFONCE_AUG_PHONE_HARD_PROB
+    )
+
+    if total <= 0:
+        raise ValueError("InfoNCE augmentation probabilities sum to zero")
+
+    r = random.random() * total
+
+    c1 = INFONCE_AUG_LIGHT_PROB
+    c2 = c1 + INFONCE_AUG_STRONG_PROB
+    c3 = c2 + INFONCE_AUG_PHONE_MILD_PROB
+    c4 = c3 + INFONCE_AUG_PHONE_MEDIUM_PROB
+
+    base = anchor.copy()
+
+    if r < c1:
+        return augment_audio(base), "light"
+
+    if r < c2:
+        return augment_audio_strong_noisy(base), "strong_noisy"
+
+    if r < c3:
+        return augment_audio_phone_mild(base), "phone_mild"
+
+    if r < c4:
+        return augment_audio_phone_medium(base), "phone_medium"
+
+    return augment_audio_phone_hard(base), "phone_hard"
 
 class TripletLoss(nn.Module):
     def __init__(self, margin: float = MARGIN):
@@ -117,22 +154,22 @@ class PreparedTripletDataset(Dataset):
         positive = pad_or_trim(random_segment(audio))
 
         if TRAIN_LOSS_TYPE == "infonce":
-            if random.random() < 0.50:
-                positive = augment_audio_strong_noisy(anchor.copy())
-            else:
-                positive = augment_audio(anchor.copy())
-
+            positive, aug_type = choose_infonce_positive_augmentation(anchor)
             positive = pad_or_trim(positive)
 
             if idx < 3:
                 logger.info(
-                    "Train sample lengths track_id=%s anchor_sec=%.2f positive_sec=%.2f anchor_samples=%s positive_samples=%s loss_type=%s",
+                    (
+                        "Train sample lengths track_id=%s anchor_sec=%.2f positive_sec=%.2f "
+                        "anchor_samples=%s positive_samples=%s loss_type=%s aug_type=%s"
+                    ),
                     anchor_item["track_id"],
                     len(anchor) / SR,
                     len(positive) / SR,
                     len(anchor),
                     len(positive),
                     TRAIN_LOSS_TYPE,
+                    aug_type,
                 )
 
             return anchor, positive, anchor

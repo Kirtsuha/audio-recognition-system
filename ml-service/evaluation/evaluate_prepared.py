@@ -1,6 +1,5 @@
 import json
 import logging
-import random
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -11,14 +10,18 @@ import torch
 
 from app.inference import aggregate_results
 from app.model import AudioEncoder
-from pipeline.augment import augment_audio
+from pipeline.augment import (
+    augment_audio_strong_noisy,
+    augment_audio_phone_noisy,
+)
 from pipeline.config import (
     INDEX_WINDOWS_PER_SONG,
     FAISS_TOP_K,
     CACHE_PREPARED_IN_MEMORY,
     CACHE_PREPARED_MAX_TRACKS,
     EMB_DIM,
-    FIXED_EVAL_DIR, SR,
+    FIXED_EVAL_DIR,
+    SR,
 )
 from pipeline.dataset import (
     extract_sliding_windows,
@@ -57,12 +60,14 @@ class PreparedAudioCache:
 
         return audio
 
+
 def append_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     with path.open("a", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
 
 def embed_windows(
     model: AudioEncoder,
@@ -124,12 +129,14 @@ def build_eval_index(
             return
 
         t0 = time.perf_counter()
+
         embs = embed_windows(
             model=model,
             windows=pending_windows,
             device=device,
             batch_size=embed_batch_size,
         )
+
         timings["flush_embed"] += time.perf_counter() - t0
         flush_count += 1
 
@@ -218,7 +225,11 @@ def load_or_create_fixed_eval_items(
         with path.open("r", encoding="utf-8") as f:
             track_ids = json.load(f)
 
-        fixed_items = [by_track_id[int(track_id)] for track_id in track_ids if int(track_id) in by_track_id]
+        fixed_items = [
+            by_track_id[int(track_id)]
+            for track_id in track_ids
+            if int(track_id) in by_track_id
+        ]
 
         if len(fixed_items) < 5:
             raise ValueError(
@@ -250,6 +261,63 @@ def load_or_create_fixed_eval_items(
     return selected
 
 
+def resolve_eval_cases(eval_noise_mode: str) -> list[str]:
+    mode = (eval_noise_mode or "noisy").lower().strip()
+
+    if mode == "clean":
+        return ["clean"]
+
+    if mode == "noisy":
+        return ["noisy"]
+
+    if mode == "phone_noisy":
+        return ["phone_noisy"]
+
+    if mode == "both":
+        return ["clean", "noisy"]
+
+    if mode == "all":
+        return ["clean", "noisy", "phone_noisy"]
+
+    raise ValueError(
+        f"Unsupported eval_noise_mode={eval_noise_mode}. "
+        "Expected one of: clean, noisy, phone_noisy, both, all"
+    )
+
+
+def resolve_primary_case(eval_noise_mode: str, available_cases: list[str]) -> str:
+    mode = (eval_noise_mode or "noisy").lower().strip()
+
+    if mode in {"clean", "noisy", "phone_noisy"}:
+        return mode
+
+    if mode == "both":
+        return "noisy"
+
+    if mode == "all":
+        return "phone_noisy"
+
+    if available_cases:
+        return available_cases[-1]
+
+    raise ValueError("No available eval cases")
+
+
+def make_eval_query_audio(clean_query: np.ndarray, case: str) -> np.ndarray:
+    case = case.lower().strip()
+
+    if case == "clean":
+        return clean_query.astype(np.float32)
+
+    if case == "noisy":
+        return augment_audio_strong_noisy(clean_query).astype(np.float32)
+
+    if case == "phone_noisy":
+        return augment_audio_phone_noisy(clean_query).astype(np.float32)
+
+    raise ValueError(f"Unsupported eval case={case}")
+
+
 def evaluate_case(
     *,
     model: AudioEncoder,
@@ -259,7 +327,6 @@ def evaluate_case(
     cache: PreparedAudioCache,
     device: torch.device,
     use_full_query_audio: bool,
-    noisy: bool,
     case_name: str,
     aggregation_strategy: str = "current",
     results_jsonl_path: Path | None = None,
@@ -274,25 +341,46 @@ def evaluate_case(
         query_started = time.perf_counter()
 
         audio = cache.load(row["prepared_path"])
-        query_audio = make_query_audio(audio, use_full_audio=use_full_query_audio)
+        clean_query = make_query_audio(audio, use_full_audio=use_full_query_audio)
+        query_audio = make_eval_query_audio(clean_query=clean_query, case=case_name)
 
         if total < 5:
             logger.info(
-                "Eval query length case=%s noisy=%s track_id=%s full_audio_sec=%.2f query_sec=%.2f query_samples=%s use_full_query_audio=%s",
+                (
+                    "Eval query length case=%s track_id=%s full_audio_sec=%.2f "
+                    "clean_query_sec=%.2f query_sec=%.2f query_samples=%s "
+                    "use_full_query_audio=%s"
+                ),
                 case_name,
-                noisy,
                 row["track_id"],
                 len(audio) / SR,
+                len(clean_query) / SR,
                 len(query_audio) / SR,
                 len(query_audio),
                 use_full_query_audio,
             )
 
-        if noisy:
-            query_audio = augment_audio(query_audio)
-
         query_windows = extract_sliding_windows(query_audio)
+
+        if not query_windows:
+            logger.warning(
+                "Eval query skipped no_windows case=%s track_id=%s query_samples=%s",
+                case_name,
+                row["track_id"],
+                len(query_audio),
+            )
+            continue
+
         query_embeddings = embed_windows(model, query_windows, device)
+
+        if len(query_embeddings) == 0:
+            logger.warning(
+                "Eval query skipped no_embeddings case=%s track_id=%s windows=%s",
+                case_name,
+                row["track_id"],
+                len(query_windows),
+            )
+            continue
 
         scores, indices = index.search(query_embeddings, k=min(FAISS_TOP_K, index.ntotal))
 
@@ -316,8 +404,13 @@ def evaluate_case(
 
         confidence = None
         margin = None
+        score = None
         support = None
         support_ratio = None
+        support_gap = None
+        support_ratio_gap = None
+        hit_count = None
+        hit_count_gap = None
         top_candidates = []
 
         if result is not None:
@@ -330,8 +423,13 @@ def evaluate_case(
 
             confidence = result.get("confidence")
             margin = result.get("margin")
+            score = result.get("score")
             support = result.get("support")
             support_ratio = result.get("support_ratio")
+            support_gap = result.get("support_gap")
+            support_ratio_gap = result.get("support_ratio_gap")
+            hit_count = result.get("hit_count")
+            hit_count_gap = result.get("hit_count_gap")
 
             if correct_top1:
                 correct_at_1 += 1
@@ -344,22 +442,28 @@ def evaluate_case(
                 "track_id": gt,
                 "split": row.get("split"),
                 "case": case_name,
-                "noisy": noisy,
                 "aggregation_strategy": aggregation_strategy,
                 "is_positive": True,
                 "predicted_song_id": predicted_song_id,
                 "correct_top1": correct_top1,
                 "correct_top5": correct_top5,
+                "score": score,
                 "confidence": confidence,
                 "margin": margin,
                 "support": support,
                 "support_ratio": support_ratio,
+                "support_gap": support_gap,
+                "support_ratio_gap": support_ratio_gap,
+                "hit_count": hit_count,
+                "hit_count_gap": hit_count_gap,
                 "latency_ms": latency_ms,
+                "query_windows": len(query_windows),
+                "query_sec": len(query_audio) / SR,
                 "top_candidates": top_candidates,
             }
         )
 
-    if results_jsonl_path is not None:
+    if results_jsonl_path is not None and result_rows:
         append_jsonl(results_jsonl_path, result_rows)
 
     lat = np.asarray(latencies_ms, dtype=np.float32)
@@ -417,20 +521,32 @@ def evaluate_prepared(
         fixed_eval_set_name=fixed_eval_set_name,
     )
 
-    windows_per_song = index_windows_override if index_windows_override is not None else INDEX_WINDOWS_PER_SONG
+    windows_per_song = (
+        index_windows_override
+        if index_windows_override is not None
+        else INDEX_WINDOWS_PER_SONG
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True
 
+    eval_cases = resolve_eval_cases(eval_noise_mode)
+    primary_case_name = resolve_primary_case(eval_noise_mode, eval_cases)
+
     logger.info(
-        "Evaluate device check cuda_available=%s device=%s gpu=%s fixed_eval_set=%s noise_mode=%s",
+        (
+            "Evaluate device check cuda_available=%s device=%s gpu=%s "
+            "fixed_eval_set=%s noise_mode=%s cases=%s primary_case=%s"
+        ),
         torch.cuda.is_available(),
         device,
         torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         fixed_eval_set_name,
         eval_noise_mode,
+        eval_cases,
+        primary_case_name,
     )
 
     cache = PreparedAudioCache()
@@ -458,25 +574,15 @@ def evaluate_prepared(
     if results_jsonl_path.exists():
         results_jsonl_path.unlink()
 
-    modes: list[tuple[str, bool]]
-    if eval_noise_mode == "clean":
-        modes = [("clean", False)]
-    elif eval_noise_mode == "noisy":
-        modes = [("noisy", True)]
-    elif eval_noise_mode == "both":
-        modes = [("clean", False), ("noisy", True)]
-    else:
-        raise ValueError(f"Unsupported eval_noise_mode={eval_noise_mode}")
-
     if aggregation_strategies is None or not aggregation_strategies:
         aggregation_strategies = ["current"]
 
-    cases = {}
+    cases: dict[str, dict[str, dict]] = {}
 
     for strategy in aggregation_strategies:
-        strategy_cases = {}
+        strategy_cases: dict[str, dict] = {}
 
-        for case_name, noisy in modes:
+        for case_name in eval_cases:
             strategy_cases[case_name] = evaluate_case(
                 model=model,
                 index=index,
@@ -485,15 +591,12 @@ def evaluate_prepared(
                 cache=cache,
                 device=device,
                 use_full_query_audio=use_full_query_audio,
-                noisy=noisy,
                 case_name=case_name,
                 aggregation_strategy=strategy,
                 results_jsonl_path=results_jsonl_path,
             )
 
         cases[strategy] = strategy_cases
-
-    primary_case_name = "noisy" if eval_noise_mode in ("noisy", "both") else "clean"
 
     best_strategy = None
     best_case_metrics = None
@@ -530,6 +633,7 @@ def evaluate_prepared(
         "eval_query_limit": eval_query_limit,
         "fixed_eval_set_name": fixed_eval_set_name,
         "eval_noise_mode": eval_noise_mode,
+        "eval_cases": eval_cases,
         "index_tracks": len(index_items),
         "index_vectors": int(index.ntotal),
         "index_windows_per_song": windows_per_song,
@@ -537,7 +641,6 @@ def evaluate_prepared(
         "elapsed_sec": time.time() - started,
     }
 
-    output_metrics_path = Path(output_metrics_path)
     output_metrics_path.parent.mkdir(parents=True, exist_ok=True)
 
     with output_metrics_path.open("w", encoding="utf-8") as f:

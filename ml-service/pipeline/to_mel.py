@@ -99,16 +99,3 @@ def to_mel_batch(
         mel_db = normalize_mel_db(mel_db)
 
     return mel_db.unsqueeze(1).contiguous()  # [B, 1, n_mels, frames]
-
-
-# def to_mel(audio: np.ndarray, sr: int = SR) -> torch.Tensor:
-#     """
-#     Backward-compatible API для старого кода.
-#     Возвращает [1, n_mels, frames].
-#     """
-#     if sr != SR:
-#         raise ValueError(f"Expected sr={SR}, got sr={sr}")
-#
-#     with torch.no_grad():
-#         batch = to_mel_batch(audio, device="cpu")
-#         return batch[0]

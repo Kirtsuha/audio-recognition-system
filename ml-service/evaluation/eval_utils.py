@@ -24,21 +24,3 @@ def read_jsonl(path: str | Path) -> list[dict]:
             if line:
                 rows.append(json.loads(line))
     return rows
-
-
-def percentile(values: list[float], p: float) -> float | None:
-    if not values:
-        return None
-    if len(values) == 1:
-        return float(values[0])
-
-    values = sorted(values)
-    rank = (len(values) - 1) * p
-    low = math.floor(rank)
-    high = math.ceil(rank)
-
-    if low == high:
-        return float(values[low])
-
-    frac = rank - low
-    return float(values[low] * (1 - frac) + values[high] * frac)

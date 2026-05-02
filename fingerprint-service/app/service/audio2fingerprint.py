@@ -3,14 +3,14 @@ from audio.preprocess import normalize
 from audio.spectrogram import spectrogram
 from fingerprint.peaks import find_peaks
 from fingerprint.hashgen import generate_hashes
-from config.config import SAMPLE_RATE, RECOGNITION_DURATION_SEC
+from config.config import SAMPLE_RATE
 
 
-def fingerprint_audio(path: str, duration: float | None = None):
+def fingerprint_audio(path: str, duration: float):
     audio, sr = load_audio(
         path,
         sr=SAMPLE_RATE,
-        duration=duration if duration is not None else RECOGNITION_DURATION_SEC,
+        duration=duration,
     )
 
     if audio is None or sr is None:

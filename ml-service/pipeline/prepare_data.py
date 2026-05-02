@@ -5,7 +5,7 @@ import os
 import numpy as np
 
 from db.track_repo import load_tracks
-from pipeline.config import INVALID_KEYS_PATH, PREPARED_TRACKS_DIR
+from pipeline.config import INVALID_KEYS_PATH, PREPARED_TRACKS_DIR, SR
 from pipeline.dataset import assign_split, load_audio
 from pipeline.manifest import load_prepared_manifest_map, write_prepared_manifest
 from s3.s3_list import list_all_songs
@@ -14,16 +14,28 @@ from s3.s3_loader import download_song
 logger = logging.getLogger("ml-pipeline.prepare-data")
 
 
+def _prepared_file_exists(row: dict) -> bool:
+    path = row.get("prepared_path")
+    return bool(path) and os.path.exists(path)
+
+
 def prepare_data(
     bucket: str,
     prefix: str,
     only_track_ids: set[int] | None = None,
-    append: bool = False,
+    append: bool = True,
     prepare_limit: int = 0,
+    skip_existing: bool = True,
 ) -> dict:
+    """
+    Production-safe prepare.
+
+    append оставлен для совместимости, но manifest больше не очищается по умолчанию.
+    Если нужен полный rebuild prepared-data, лучше явно удалить PREPARED_DATASET_DIR.
+    """
     PREPARED_TRACKS_DIR.mkdir(parents=True, exist_ok=True)
 
-    existing_manifest_map = load_prepared_manifest_map() if append else {}
+    existing_manifest_map = load_prepared_manifest_map()
 
     db_tracks = load_tracks()
     s3_keys = set(list_all_songs(bucket=bucket, prefix=prefix))
@@ -40,7 +52,9 @@ def prepare_data(
         if s3_key not in s3_keys:
             continue
 
-        if append and track_id in existing_manifest_map:
+        existing = existing_manifest_map.get(track_id)
+
+        if skip_existing and existing is not None and _prepared_file_exists(existing):
             continue
 
         candidate_tracks.append(row)
@@ -51,13 +65,14 @@ def prepare_data(
         candidate_tracks = candidate_tracks[:prepare_limit]
 
     logger.info(
-        "Prepare-data started bucket=%s prefix=%s s3_objects=%s db_tracks=%s append=%s candidates=%s",
+        "Prepare-data started bucket=%s prefix=%s s3_objects=%s db_tracks=%s existing=%s candidates=%s prepare_limit=%s",
         bucket,
         prefix,
         len(s3_keys),
         len(db_tracks),
-        append,
+        len(existing_manifest_map),
         len(candidate_tracks),
+        prepare_limit,
     )
 
     invalid_items = []
@@ -84,7 +99,7 @@ def prepare_data(
                 "s3_key": key,
                 "prepared_path": str(out_path),
                 "num_samples": int(len(audio)),
-                "duration_sec": float(len(audio) / 16000.0),
+                "duration_sec": float(len(audio) / SR),
                 "split": assign_split(track_id),
             }
 
@@ -92,11 +107,12 @@ def prepare_data(
 
             if idx % 100 == 0 or idx == len(candidate_tracks):
                 logger.info(
-                    "Prepare-data progress scanned=%s/%s processed=%s skipped=%s",
+                    "Prepare-data progress scanned=%s/%s processed=%s skipped=%s total_prepared=%s",
                     idx,
                     len(candidate_tracks),
                     processed,
                     skipped,
+                    len(existing_manifest_map),
                 )
 
         except Exception as exc:
@@ -123,6 +139,8 @@ def prepare_data(
         "invalid_path": str(INVALID_KEYS_PATH),
         "total_prepared_tracks": len(existing_manifest_map),
         "prepare_limit": prepare_limit,
+        "candidate_tracks": len(candidate_tracks),
+        "only_track_ids": len(only_track_ids) if only_track_ids is not None else None,
     }
 
     logger.info("Prepare-data finished summary=%s", summary)

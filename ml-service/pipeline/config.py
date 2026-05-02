@@ -56,7 +56,7 @@ FAISS_INDEX_META_PATH = Path(
     os.getenv("FAISS_INDEX_META_PATH", str(ACTIVE_ARTIFACTS_DIR / "faiss_meta.json"))
 )
 
-AGGREGATION_STRATEGY = os.getenv("AGGREGATION_STRATEGY", "support") # potentially change to max
+AGGREGATION_STRATEGY = os.getenv("AGGREGATION_STRATEGY", "max") # potentially change to max
 
 # Acceptance thresholds
 # MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.58"))
@@ -85,3 +85,18 @@ FAST_AUGMENT = os.getenv("FAST_AUGMENT", "true").lower() == "true"
 CACHE_PREPARED_IN_MEMORY = os.getenv("CACHE_PREPARED_IN_MEMORY", "false").lower() == "true"
 CACHE_PREPARED_MAX_TRACKS = int(os.getenv("CACHE_PREPARED_MAX_TRACKS", "0"))
 TORCHAUDIO_MEL_DEVICE = os.getenv("TORCHAUDIO_MEL_DEVICE", "cpu")
+
+#Production pipeline defaults
+FULL_RETRAIN_NEW_TRACK_RATIO = float(os.getenv("FULL_RETRAIN_NEW_TRACK_RATIO", "0.25"))
+FULL_RETRAIN_NEW_TRACK_MIN = int(os.getenv("FULL_RETRAIN_NEW_TRACK_MIN", "2000"))
+
+KEEP_LAST_FULL_RUNS = int(os.getenv("KEEP_LAST_FULL_RUNS", "2"))
+KEEP_LAST_EXPERIMENT_RUNS = int(os.getenv("KEEP_LAST_EXPERIMENT_RUNS", "5"))
+
+RUN_METADATA_FILENAME = os.getenv("RUN_METADATA_FILENAME", "run_metadata.json")
+
+INFONCE_AUG_LIGHT_PROB = float(os.getenv("INFONCE_AUG_LIGHT_PROB", "0.15"))
+INFONCE_AUG_STRONG_PROB = float(os.getenv("INFONCE_AUG_STRONG_PROB", "0.40"))
+INFONCE_AUG_PHONE_MILD_PROB = float(os.getenv("INFONCE_AUG_PHONE_MILD_PROB", "0.30"))
+INFONCE_AUG_PHONE_MEDIUM_PROB = float(os.getenv("INFONCE_AUG_PHONE_MEDIUM_PROB", "0.12"))
+INFONCE_AUG_PHONE_HARD_PROB = float(os.getenv("INFONCE_AUG_PHONE_HARD_PROB", "0.03"))

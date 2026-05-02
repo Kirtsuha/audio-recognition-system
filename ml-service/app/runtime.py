@@ -158,6 +158,15 @@ def embed_windows(windows: list[np.ndarray], batch_size: int = 64) -> np.ndarray
 
 
 def runtime_status() -> dict[str, Any]:
+    meta = None
+
+    if os.path.exists(FAISS_INDEX_META_PATH):
+        try:
+            with open(FAISS_INDEX_META_PATH, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+        except Exception:
+            meta = None
+
     return {
         "runtime_ready": runtime_ready(),
         "model_exists": os.path.exists(MODEL_PATH),
@@ -168,4 +177,5 @@ def runtime_status() -> dict[str, Any]:
         "song_ids_total": len(_song_ids) if _song_ids is not None else None,
         "index_dim": _index.d if _index is not None else None,
         "model_dim": _model.head[-1].out_features if _model is not None else None,
+        "faiss_meta": meta,
     }

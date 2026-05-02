@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import Query
 
+from config.config import INDEX_DURATION_SEC
 from fingerprint.matcher import match
 from repository.db import get_db
 from repository.models import Track
@@ -62,7 +63,7 @@ def recognize_file(file: UploadFile, db: Session) -> dict:
         path = tmp.name
 
     try:
-        hashes = fingerprint_audio(path)
+        hashes = fingerprint_audio(path, INDEX_DURATION_SEC)
         result = match(hashes, db)
 
         if not result.get("matched"):
