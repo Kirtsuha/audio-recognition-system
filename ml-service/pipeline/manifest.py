@@ -41,6 +41,19 @@ def load_prepared_manifest(
     )
 
 
+def load_all_prepared_manifest(
+    only_track_ids: set[int] | None = None,
+    path: Path = PREPARED_MANIFEST_PATH,
+) -> list[dict]:
+    rows = list(iter_prepared_manifest(path))
+
+    if only_track_ids is not None:
+        rows = [row for row in rows if int(row["track_id"]) in only_track_ids]
+
+    rows.sort(key=lambda row: int(row["track_id"]))
+    return rows
+
+
 def load_prepared_manifest_map(path: Path = PREPARED_MANIFEST_PATH) -> dict[int, dict]:
     return {int(row["track_id"]): row for row in iter_prepared_manifest(path)}
 

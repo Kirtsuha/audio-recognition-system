@@ -6,7 +6,7 @@ from typing import Any
 
 from app.inference import aggregate_results
 from app.runtime import embed_windows, get_runtime, should_accept
-from pipeline.config import FAISS_TOP_K
+from pipeline.config import FAISS_TOP_K, AGGREGATION_STRATEGY
 from pipeline.dataset import extract_sliding_windows, load_audio
 
 logger = logging.getLogger("ml-service.recognition")
@@ -35,6 +35,7 @@ def recognize_audio_bytes(audio_bytes: bytes) -> dict[str, Any]:
             scores=scores,
             indices=nearest,
             song_ids=runtime.song_ids,
+            strategy=AGGREGATION_STRATEGY,
         )
 
         if result is None:

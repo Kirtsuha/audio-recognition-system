@@ -104,14 +104,28 @@ services:
       S3_SECRET_KEY: minio123
       S3_BUCKET: tracks
       S3_PREFIX: fma/
+      HF_TOKEN: ${HF_TOKEN}
+      FP_INDEX_WORKERS: 4
+      FP_FAST_REINDEX_MODE: "false"
+      FP_INSERT_BATCH_SIZE: 10000
+      FP_INDEX_PROGRESS_EVERY: 25
     ports:
       - "8000:8000"
 
   ml-service:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
     build:
       context: ./ml-service
       dockerfile: Dockerfile
     depends_on:
+      fingerprint-service:
+        condition: service_started
       kafka:
         condition: service_healthy
       minio-init:
@@ -150,6 +164,9 @@ services:
       THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
       FAST_AUGMENT: "true"
       TORCHAUDIO_MEL_DEVICE: "cpu"
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      COMBINED_RESULTS_PATH: /app/artifacts/eval/combined_eval_results.jsonl
+      COMBINED_METRICS_PATH: /app/artifacts/eval/combined_eval_metrics.json
     ports:
       - "8010:8010"
     volumes:
@@ -158,6 +175,14 @@ services:
     shm_size: "1gb"
 
   ml-pipeline-runner:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+
     build:
       context: ./ml-service
       dockerfile: Dockerfile.pipeline
@@ -170,8 +195,8 @@ services:
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: minio
       S3_SECRET_KEY: minio123
-      S3_BUCKET: tracks
-      S3_PREFIX: fma/
+      S3_BUCKET: full-tracks
+      S3_PREFIX: ""
       TRACKS_DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
       ARTIFACTS_DIR: /app/artifacts
       ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
@@ -189,7 +214,6 @@ services:
       EVAL_RESULTS_PATH: /app/artifacts/eval/eval_results.jsonl
       EVAL_METRICS_PATH: /app/artifacts/eval/eval_metrics.json
       THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
-      FAST_AUGMENT: "true"
       TORCHAUDIO_MEL_DEVICE: "cpu"
     ports:
       - "8011:8011"
@@ -197,6 +221,46 @@ services:
       - ml_artifacts:/app/artifacts
       - ml_prepared_data:/app/prepared-data
     shm_size: "1gb"
+
+  evaluation-service:
+    build:
+      context: ./evaluation-service
+    depends_on:
+      fingerprint-service:
+        condition: service_started
+      ml-service:
+        condition: service_started
+    environment:
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      ML_SERVICE_URL: http://ml-service:8010
+
+      PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
+
+      EVAL_DIR: /app/eval
+      EVAL_QUERIES_DIR: /app/eval/queries
+      EVAL_QUERIES_PATH: /app/eval/eval_queries.jsonl
+      FINGERPRINT_RESULTS_PATH: /app/eval/fingerprint_results.jsonl
+      ML_RESULTS_PATH: /app/eval/ml_results.jsonl
+      COMBINED_RESULTS_PATH: /app/eval/combined_results.jsonl
+      METRICS_PATH: /app/eval/metrics.json
+
+      EVAL_AUDIO_SOURCE: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: full-tracks
+
+      LOG_LEVEL: INFO
+      DATASET_PROGRESS_EVERY: 25
+      RUNNER_PROGRESS_EVERY: 25
+      S3_PREFIX_CANDIDATES: ",fma/"
+
+      EVAL_SR: 16000
+    ports:
+      - "8020:8020"
+    volumes:
+      - ml_prepared_data:/app/prepared-data
+      - eval_artifacts:/app/eval
 
   orchestration-service:
     build:
@@ -233,3 +297,4 @@ volumes:
   kafka_data:
   ml_artifacts:
   ml_prepared_data:
+  eval_artifacts:

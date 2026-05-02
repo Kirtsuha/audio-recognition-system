@@ -1,29 +1,64 @@
-import hashlib
+from collections import defaultdict
 
-from config.config import FAN_VALUE, MAX_DELTA_T
+from config.config import (
+    FAN_VALUE,
+    MIN_DELTA_T,
+    MAX_DELTA_T,
+    FREQ_BIN_SIZE,
+    DELTA_T_BIN_SIZE,
+)
 
 
-def hash_triplet(f1, f2, delta_t):
-    s = f"{f1}|{f2}|{delta_t}"
-    return int(hashlib.sha256(s.encode()).hexdigest(), 16)
+def quantize_freq(f: int) -> int:
+    return int(f) // FREQ_BIN_SIZE
+
+
+def quantize_delta_t(delta_t: int) -> int:
+    return int(round(int(delta_t) / DELTA_T_BIN_SIZE))
+
 
 def pack_hash(f1: int, f2: int, delta_t: int) -> int:
-    return (f1 << 23) | (f2 << 24) | (delta_t)
+    qf1 = quantize_freq(f1)
+    qf2 = quantize_freq(f2)
+    qdt = quantize_delta_t(delta_t)
+
+    return ((qf1 & 0xFFF) << 20) | ((qf2 & 0xFFF) << 8) | (qdt & 0xFF)
 
 
 def generate_hashes(peaks):
-    peaks = sorted(peaks, key=lambda x: x[0])
+    peaks = sorted(peaks, key=lambda x: (x[0], x[1]))
+
+    by_time = defaultdict(list)
+    for t, f in peaks:
+        by_time[int(t)].append(int(f))
+
+    times = sorted(by_time.keys())
     hashes = []
 
-    for i in range(len(peaks)):
-        t1, f1 = peaks[i]
-        for j in range(1, FAN_VALUE):
-            if i + j < len(peaks):
-                t2, f2 = peaks[i + j]
-                delta_t = t2 - t1
-                if 0 < delta_t <= MAX_DELTA_T:
-                    h = pack_hash(f1, f2, delta_t)
-                    hashes.append((h, t1))
-    print("peaks:", len(peaks))
-    print("hashes:", len(hashes))
+    for time_idx, t1 in enumerate(times):
+        future = []
+
+        for t2 in times[time_idx + 1:]:
+            dt = t2 - t1
+
+            if dt < MIN_DELTA_T:
+                continue
+
+            if dt > MAX_DELTA_T:
+                break
+
+            for f2 in by_time[t2]:
+                future.append((dt, f2))
+
+        if not future:
+            continue
+
+        if len(future) > FAN_VALUE:
+            step = len(future) / FAN_VALUE
+            future = [future[int(i * step)] for i in range(FAN_VALUE)]
+
+        for f1 in by_time[t1]:
+            for dt, f2 in future:
+                hashes.append((pack_hash(f1, f2, dt), t1))
+
     return hashes

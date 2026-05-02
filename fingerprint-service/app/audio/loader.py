@@ -5,7 +5,7 @@ import numpy as np
 from config.config import SAMPLE_RATE
 
 
-def load_audio(path, sr=SAMPLE_RATE, duration=15):
+def load_audio(path, sr=SAMPLE_RATE, duration=None):
     try:
         y, file_sr = librosa.load(
             path,

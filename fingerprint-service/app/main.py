@@ -4,13 +4,14 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 import threading
 import uuid
 from datetime import datetime, timezone
 from fastapi import Query
 
+from config.config import INDEX_DURATION_SEC
 from fingerprint.matcher import match
 from repository.db import get_db
 from repository.models import Track
@@ -18,13 +19,24 @@ from scripts.fma_to_s3_loader import upload_hf_fma_to_s3
 from scripts.s3_loader import upload_fma_zip
 from service.audio2fingerprint import fingerprint_audio
 from service.postgres_loader_pipeline import process_s3_bucket
-
+from logging_utils import configure_logging
 from repository.init_db import Base
 from repository.database_config import engine
+
+from fingerprint_experiment.schemas import (
+    AsyncJobResponse,
+    FingerprintExperimentRequest,
+)
+from fingerprint_experiment.runner import run_fingerprint_experiment
+from fingerprint_experiment.job_status import get_status, update_status, utc_now_iso
 
 app = FastAPI(title="Fingerprint Music Recognition service")
 UPLOAD_JOBS = {}
 UPLOAD_JOBS_LOCK = threading.Lock()
+EXPERIMENT_IN_PROGRESS = False
+
+configure_logging()
+logger = logging.getLogger("fingerprint-service")
 
 @app.on_event("startup")
 def init_db():
@@ -45,52 +57,60 @@ def serialize_track(track: Track) -> dict:
     }
 
 
-@app.post("/index")
-def index_track_api(
-        file: UploadFile = File(...),
-        db: Session = Depends(get_db)
-):
-    print("Recognition request started for file=%s", file.filename)
-
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+def recognize_file(file: UploadFile, db: Session) -> dict:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename or "query.wav").suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         path = tmp.name
 
     try:
-        file_size = os.path.getsize(path)
-        print("Temporary audio file saved to %s (%s bytes)", path, file_size)
-
-        hashes = fingerprint_audio(path)
-        print("Generated %s hashes for request file=%s", len(hashes), file.filename)
-
+        hashes = fingerprint_audio(path, INDEX_DURATION_SEC)
         result = match(hashes, db)
 
-        if not result:
-            print("No match found for file=%s", file.filename)
-            return {"match": False}
+        if not result.get("matched"):
+            return {
+                "match": False,
+                "confidence": result.get("confidence", 0.0),
+                "reason": result.get("reason"),
+                "source": "fingerprint",
+                "debug": result,
+            }
 
         track = db.query(Track).filter(Track.id == result["track_id"]).first()
-        if track is None:
-            response = {
-                "match": True,
-                "track_id": result["track_id"],
-                "confidence": min(1.0, result["matches"] / 100)
-            }
-            print("Match found without metadata: %s", response)
-            return response
 
         response = {
             "match": True,
-            **serialize_track(track),
-            "confidence": min(1.0, result["matches"] / 100)
+            "track_id": result["track_id"],
+            "confidence": result["confidence"],
+            "source": "fingerprint",
+            "debug": result,
         }
-        print("Match found for file=%s: track_id=%s", file.filename, track.id)
+
+        if track is not None:
+            response.update(serialize_track(track))
+
         return response
+
     finally:
         try:
             os.remove(path)
         except OSError:
-            print("Failed to remove temporary file %s", path)
+            pass
+
+
+@app.post("/recognize")
+def recognize_api(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    return recognize_file(file, db)
+
+
+@app.post("/index")
+def legacy_index_alias(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    return recognize_file(file, db)
 
 
 @app.get("/tracks/{track_id}")
@@ -222,3 +242,83 @@ def list_hf_upload_jobs():
         return {
             "jobs": list(UPLOAD_JOBS.values())
         }
+
+def run_fingerprint_experiment_job(payload: FingerprintExperimentRequest):
+    global EXPERIMENT_IN_PROGRESS
+
+    if EXPERIMENT_IN_PROGRESS:
+        return
+
+    EXPERIMENT_IN_PROGRESS = True
+
+    update_status(
+        current_job="fingerprint-experiment",
+        phase="running",
+        started_at=utc_now_iso(),
+        finished_at=None,
+        last_error=None,
+        progress={
+            "experiment_name": payload.experiment_name,
+            "bucket": payload.bucket,
+            "prefix": payload.prefix,
+            "track_limit": payload.track_limit,
+            "query_limit": payload.query_limit,
+        },
+    )
+
+    try:
+        summary = run_fingerprint_experiment(payload)
+
+        update_status(
+            phase="done",
+            finished_at=utc_now_iso(),
+            last_success=utc_now_iso(),
+            progress={
+                "summary": summary,
+            },
+        )
+
+    except Exception as exc:
+        logger.exception("Fingerprint experiment failed")
+
+        update_status(
+            phase="failed",
+            finished_at=utc_now_iso(),
+            last_error=str(exc),
+        )
+
+    finally:
+        EXPERIMENT_IN_PROGRESS = False
+
+
+@app.post("/experiments/fingerprint/run", response_model=AsyncJobResponse)
+def fingerprint_experiment_run(
+    payload: FingerprintExperimentRequest,
+    background_tasks: BackgroundTasks,
+):
+    if EXPERIMENT_IN_PROGRESS:
+        raise HTTPException(status_code=409, detail="Fingerprint experiment is already running")
+
+    background_tasks.add_task(run_fingerprint_experiment_job, payload)
+
+    return AsyncJobResponse(
+        accepted=True,
+        status="scheduled",
+        run_dir=None,
+    )
+
+
+@app.post("/experiments/fingerprint/run-sync")
+def fingerprint_experiment_run_sync(payload: FingerprintExperimentRequest):
+    if EXPERIMENT_IN_PROGRESS:
+        raise HTTPException(status_code=409, detail="Fingerprint experiment is already running")
+
+    return run_fingerprint_experiment(payload)
+
+
+@app.get("/experiments/fingerprint/status")
+def fingerprint_experiment_status():
+    return {
+        "experiment_in_progress": EXPERIMENT_IN_PROGRESS,
+        "job_status": get_status(),
+    }

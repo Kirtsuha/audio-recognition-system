@@ -22,6 +22,7 @@ EVAL_QUERIES_PATH = Path(os.getenv("EVAL_QUERIES_PATH", str(EVAL_DIR / "eval_que
 EVAL_RESULTS_PATH = Path(os.getenv("EVAL_RESULTS_PATH", str(EVAL_DIR / "eval_results.jsonl")))
 EVAL_METRICS_PATH = Path(os.getenv("EVAL_METRICS_PATH", str(EVAL_DIR / "eval_metrics.json")))
 THRESHOLD_TUNING_PATH = Path(os.getenv("THRESHOLD_TUNING_PATH", str(EVAL_DIR / "threshold_tuning.json")))
+FIXED_EVAL_DIR = Path(os.getenv("FIXED_EVAL_DIR", str(EVAL_DIR / "fixed_sets")))
 
 # Prepared dataset
 PREPARED_DATA_DIR = Path(os.getenv("PREPARED_DATA_DIR", "/app/prepared-data"))
@@ -47,20 +48,34 @@ FMAX = float(os.getenv("FMAX", str(SR // 2)))
 # Embeddings / Index
 EMB_DIM = int(os.getenv("EMB_DIM", "128"))
 FAISS_TOP_K = int(os.getenv("FAISS_TOP_K", "15"))
-INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "24"))
+INDEX_WINDOWS_PER_SONG = int(os.getenv("INDEX_WINDOWS_PER_SONG", "96"))
+FAISS_INDEX_TYPE = os.getenv("FAISS_INDEX_TYPE", "ivf_flat")  # flat | ivf_flat
+FAISS_NLIST = int(os.getenv("FAISS_NLIST", "4096"))
+FAISS_NPROBE = int(os.getenv("FAISS_NPROBE", "32"))
+FAISS_INDEX_META_PATH = Path(
+    os.getenv("FAISS_INDEX_META_PATH", str(ACTIVE_ARTIFACTS_DIR / "faiss_meta.json"))
+)
+
+AGGREGATION_STRATEGY = os.getenv("AGGREGATION_STRATEGY", "max") # potentially change to max
 
 # Acceptance thresholds
-MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.58"))
-MIN_MARGIN = float(os.getenv("MIN_MARGIN", "0.10"))
-MIN_SUPPORTED_WINDOWS = int(os.getenv("MIN_SUPPORTED_WINDOWS", "2"))
+# MIN_CONFIDENCE = float(os.getenv("MIN_CONFIDENCE", "0.58"))
+# MIN_MARGIN = float(os.getenv("MIN_MARGIN", "0.10"))
+# MIN_SUPPORTED_WINDOWS = int(os.getenv("MIN_SUPPORTED_WINDOWS", "2"))
+MIN_CONFIDENCE=0.55
+MIN_MARGIN=0.0
+MIN_SUPPORTED_WINDOWS=1
 
 # Train
 BATCH_SIZE = int(os.getenv("BATCH_SIZE", "24"))
-NUM_WORKERS = int(os.getenv("NUM_WORKERS", "0"))
+NUM_WORKERS = int(os.getenv("NUM_WORKERS", "4"))
 LR = float(os.getenv("LR", "1e-3"))
 EPOCHS = int(os.getenv("EPOCHS", "5"))
 MARGIN = float(os.getenv("MARGIN", "0.30"))
 TRAIN_NEGATIVE_RETRIES = int(os.getenv("TRAIN_NEGATIVE_RETRIES", "10"))
+TRAIN_LOSS_TYPE = os.getenv("TRAIN_LOSS_TYPE", "infonce")  # triplet | infonce
+INFONCE_TEMPERATURE = float(os.getenv("INFONCE_TEMPERATURE", "0.05"))
+SAVE_EPOCH_CHECKPOINTS = os.getenv("SAVE_EPOCH_CHECKPOINTS", "true").lower() == "true"
 
 # Experiment defaults
 EXPERIMENT_RANDOM_SEED = int(os.getenv("EXPERIMENT_RANDOM_SEED", "42"))
@@ -70,3 +85,18 @@ FAST_AUGMENT = os.getenv("FAST_AUGMENT", "true").lower() == "true"
 CACHE_PREPARED_IN_MEMORY = os.getenv("CACHE_PREPARED_IN_MEMORY", "false").lower() == "true"
 CACHE_PREPARED_MAX_TRACKS = int(os.getenv("CACHE_PREPARED_MAX_TRACKS", "0"))
 TORCHAUDIO_MEL_DEVICE = os.getenv("TORCHAUDIO_MEL_DEVICE", "cpu")
+
+#Production pipeline defaults
+FULL_RETRAIN_NEW_TRACK_RATIO = float(os.getenv("FULL_RETRAIN_NEW_TRACK_RATIO", "0.25"))
+FULL_RETRAIN_NEW_TRACK_MIN = int(os.getenv("FULL_RETRAIN_NEW_TRACK_MIN", "2000"))
+
+KEEP_LAST_FULL_RUNS = int(os.getenv("KEEP_LAST_FULL_RUNS", "2"))
+KEEP_LAST_EXPERIMENT_RUNS = int(os.getenv("KEEP_LAST_EXPERIMENT_RUNS", "5"))
+
+RUN_METADATA_FILENAME = os.getenv("RUN_METADATA_FILENAME", "run_metadata.json")
+
+INFONCE_AUG_LIGHT_PROB = float(os.getenv("INFONCE_AUG_LIGHT_PROB", "0.15"))
+INFONCE_AUG_STRONG_PROB = float(os.getenv("INFONCE_AUG_STRONG_PROB", "0.40"))
+INFONCE_AUG_PHONE_MILD_PROB = float(os.getenv("INFONCE_AUG_PHONE_MILD_PROB", "0.30"))
+INFONCE_AUG_PHONE_MEDIUM_PROB = float(os.getenv("INFONCE_AUG_PHONE_MEDIUM_PROB", "0.12"))
+INFONCE_AUG_PHONE_HARD_PROB = float(os.getenv("INFONCE_AUG_PHONE_HARD_PROB", "0.03"))

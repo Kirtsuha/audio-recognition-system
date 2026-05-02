@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+python-multipart
+requests
+numpy
+soundfile
+librosa
+boto3
