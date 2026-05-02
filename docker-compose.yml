@@ -285,7 +285,7 @@ services:
       ML_KAFKA_REQUEST_TOPIC: ml-recognition-requests
       ML_KAFKA_RESPONSE_TOPIC: ml-recognition-responses
       ML_TIMEOUT_MS: 15000
-      JWT_SECRET: supersecretkeysupersecretkey
+      JWT_SECRET: supersecretkeysupersecretkeysupersecretkey123456
       JWT_EXPIRATION: 86400000
     ports:
       - "8080:8080"
