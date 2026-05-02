@@ -5,37 +5,24 @@ import lombok.*;
 
 @Entity
 @Table(name = "users")
-@Data
 @Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class User {
+
     @Id
     @GeneratedValue
     private Long id;
 
-    @Column(unique = true)
+    @Column(unique = true, nullable = false, length = 64)
     private String username;
 
+    @Column(nullable = false)
     private String passwordHash;
 
-    @Column
+    @Builder.Default
+    @Column(nullable = false)
     private String role = "ROLE_USER";
-
-    public String getRole() {
-        return role;
-    }
-
-    public Long getId() {
-        return id;
-    }
-
-    public String getUsername() {
-        return username;
-    }
-
-    public String getPasswordHash() {
-        return passwordHash;
-    }
 }
