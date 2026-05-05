@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from fastapi import Query
 
 from config.config import INDEX_DURATION_SEC
-from fingerprint.matcher import match
+from fingerprint.matcher import match, retrieve_candidates
 from repository.db import get_db
 from repository.models import Track
 from scripts.fma_to_s3_loader import upload_hf_fma_to_s3
@@ -112,6 +112,79 @@ def legacy_index_alias(
 ):
     return recognize_file(file, db)
 
+def retrieve_candidates_file(file: UploadFile, db: Session, top_k: int = 50) -> dict:
+    with tempfile.NamedTemporaryFile(
+        delete=False,
+        suffix=Path(file.filename or "query.wav").suffix,
+    ) as tmp:
+        shutil.copyfileobj(file.file, tmp)
+        path = tmp.name
+
+    try:
+        hashes = fingerprint_audio(path, INDEX_DURATION_SEC)
+        result = retrieve_candidates(hashes, db, top_k=top_k)
+
+        track_ids = [
+            int(candidate["track_id"])
+            for candidate in result.get("candidates", [])
+        ]
+
+        tracks = (
+            db.query(Track)
+            .filter(Track.id.in_(track_ids))
+            .all()
+            if track_ids
+            else []
+        )
+
+        tracks_by_id = {int(track.id): track for track in tracks}
+
+        enriched_candidates = []
+
+        for candidate in result.get("candidates", []):
+            track = tracks_by_id.get(int(candidate["track_id"]))
+
+            item = dict(candidate)
+
+            if track is not None:
+                item.update(
+                    {
+                        "title": track.title,
+                        "artist": track.artist,
+                        "s3_key": track.s3_key,
+                    }
+                )
+
+            enriched_candidates.append(item)
+
+        return {
+            "source": "fingerprint",
+            "top_k": top_k,
+            "query_hashes": result.get("query_hashes", 0),
+            "unique_query_hashes": result.get("unique_query_hashes", 0),
+            "best_aligned_matches": result.get("best_aligned_matches", 0),
+            "second_aligned_matches": result.get("second_aligned_matches", 0),
+            "reason": result.get("reason"),
+            "candidates": enriched_candidates,
+        }
+
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+@app.post("/retrieve-candidates")
+def retrieve_candidates_api(
+    file: UploadFile = File(...),
+    top_k: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    return retrieve_candidates_file(
+        file=file,
+        db=db,
+        top_k=top_k,
+    )
 
 @app.get("/tracks/{track_id}")
 def get_track(track_id: int, db: Session = Depends(get_db)):

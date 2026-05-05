@@ -3,6 +3,7 @@ package org.hse.musicrecognition.service;
 import lombok.RequiredArgsConstructor;
 import org.hse.musicrecognition.domain.RecognitionHistory;
 import org.hse.musicrecognition.domain.User;
+import org.hse.musicrecognition.exception.NotFoundException;
 import org.hse.musicrecognition.repository.HistoryRepository;
 import org.hse.musicrecognition.repository.UserRepository;
 import org.springframework.stereotype.Service;
@@ -26,7 +27,8 @@ public class HistoryService {
             double confidence,
             String source
     ) {
-        User user = userRepo.findByUsername(username).orElseThrow();
+        User user = userRepo.findByUsername(username)
+                .orElseThrow(() -> new NotFoundException("User not found: " + username));
 
         repo.save(RecognitionHistory.builder()
                 .filename(filename)

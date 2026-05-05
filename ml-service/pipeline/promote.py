@@ -46,6 +46,9 @@ def promote_run_to_active(run_dir: str | Path, require_metrics: bool = True) -> 
         "faiss_meta.json",
         "run_metadata.json",
         "threshold_tuning.json",
+        "reranker_ref_embeddings.npy",
+        "reranker_ref_meta.jsonl",
+        "reranker_ref_config.json",
     ]
 
     for name in required:

@@ -7,7 +7,9 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 
 from app.logging_utils import configure_logging, log_stage
 from evaluation.evaluate_artifacts import evaluate_artifacts
+from evaluation.reranker_evaluation import evaluate_reranker
 from evaluation.threshold_tuning import tune_thresholds
+from pipeline.build_reranker_referece_embeddings import build_reranker_reference_embeddings
 from pipeline.cleanup import cleanup_runs
 from pipeline.retrain_status import get_retrain_status
 from pipeline.run_metadata import write_run_metadata
@@ -16,7 +18,8 @@ from pipeline_runner.schemas import (
     ExperimentRunRequest,
     ThresholdTuneExperimentRequest,
     FullRunRequest, EvaluateExistingModelRequest, IncrementalSyncRequest, PromoteRunRequest,
-    CleanupRequest, BuildEmbeddingsRequest, BuildFaissOnlyRequest, EvaluateArtifactsRequest
+    CleanupRequest, BuildEmbeddingsRequest, BuildFaissOnlyRequest, EvaluateArtifactsRequest, EvaluateRerankerRequest,
+    BuildRerankerReferenceEmbeddingsRequest
 )
 from pipeline.build_embeddings_from_prepared import build_embeddings_from_prepared
 from pipeline.build_index import build_faiss_index
@@ -957,6 +960,222 @@ async def evaluate_artifacts_endpoint(
         raise HTTPException(status_code=409, detail="Pipeline job is already running")
 
     background_tasks.add_task(run_evaluate_artifacts, payload)
+
+    return AsyncJobResponse(
+        accepted=True,
+        status="scheduled",
+        bucket="",
+        prefix="",
+    )
+
+def run_evaluate_reranker(payload: EvaluateRerankerRequest) -> None:
+    global pipeline_in_progress
+
+    if pipeline_in_progress:
+        return
+
+    pipeline_in_progress = True
+
+    output_metrics_path = Path(payload.output_metrics_path)
+    output_results_path = Path(payload.output_results_path)
+
+    update_status(
+        current_job="evaluate-reranker",
+        phase="validate",
+        started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        finished_at=None,
+        last_error=None,
+        progress={
+            "output_metrics_path": str(output_metrics_path),
+            "output_results_path": str(output_results_path),
+            "val_limit": payload.val_limit,
+            "test_limit": payload.test_limit,
+            "query_limit": payload.query_limit,
+            "top_k": payload.top_k,
+            "reranker_max_candidates": payload.reranker_max_candidates,
+            "cases": payload.cases,
+            "segment_seconds": payload.segment_seconds,
+            "fp_weight": payload.fp_weight,
+            "ml_weight": payload.ml_weight,
+            "timeout_sec": payload.timeout_sec,
+        },
+    )
+    reset_progress()
+
+    try:
+        update_status(phase="evaluate")
+
+        with log_stage(
+            logger,
+            "evaluate-reranker",
+            output_metrics_path=str(output_metrics_path),
+            output_results_path=str(output_results_path),
+        ):
+            metrics = evaluate_reranker(
+                output_metrics_path=output_metrics_path,
+                output_results_path=output_results_path,
+                val_limit=payload.val_limit,
+                test_limit=payload.test_limit,
+                query_limit=payload.query_limit,
+                top_k=payload.top_k,
+                reranker_max_candidates=payload.reranker_max_candidates,
+                cases=payload.cases,
+                segment_seconds=payload.segment_seconds,
+                fp_weight=payload.fp_weight,
+                ml_weight=payload.ml_weight,
+                timeout_sec=payload.timeout_sec,
+            )
+
+        update_status(
+            phase="done",
+            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            progress={
+                "output_metrics_path": str(output_metrics_path),
+                "output_results_path": str(output_results_path),
+                "metrics": metrics,
+            },
+        )
+
+    except Exception as exc:
+        update_status(
+            phase="failed",
+            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            last_error=str(exc),
+            progress={
+                "output_metrics_path": str(output_metrics_path),
+                "output_results_path": str(output_results_path),
+            },
+        )
+        logger.exception("Evaluate reranker failed")
+
+    finally:
+        pipeline_in_progress = False
+
+@app.post("/pipeline/evaluate-reranker", response_model=AsyncJobResponse)
+async def evaluate_reranker_endpoint(
+    payload: EvaluateRerankerRequest,
+    background_tasks: BackgroundTasks,
+):
+    if pipeline_in_progress:
+        raise HTTPException(status_code=409, detail="Pipeline job is already running")
+
+    background_tasks.add_task(run_evaluate_reranker, payload)
+
+    return AsyncJobResponse(
+        accepted=True,
+        status="scheduled",
+        bucket="",
+        prefix="",
+    )
+
+def run_build_reranker_reference_embeddings(payload: BuildRerankerReferenceEmbeddingsRequest) -> None:
+    global pipeline_in_progress
+
+    if pipeline_in_progress:
+        return
+
+    pipeline_in_progress = True
+
+    run_dir = Path(payload.run_dir)
+    model_path = Path(payload.model_path)
+
+    embeddings_path = run_dir / payload.embeddings_filename
+    meta_path = run_dir / payload.meta_filename
+    config_path = run_dir / payload.config_filename
+
+    update_status(
+        current_job="build-reranker-reference-embeddings",
+        phase="validate",
+        started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        finished_at=None,
+        last_error=None,
+        progress={
+            "run_dir": str(run_dir),
+            "model_path": str(model_path),
+            "embeddings_path": str(embeddings_path),
+            "meta_path": str(meta_path),
+            "config_path": str(config_path),
+            "index_all_prepared": payload.index_all_prepared,
+            "train_limit": payload.train_limit,
+            "val_limit": payload.val_limit,
+            "test_limit": payload.test_limit,
+            "window_seconds": payload.window_seconds,
+            "hop_seconds": payload.hop_seconds,
+            "batch_size": payload.batch_size,
+        },
+    )
+    reset_progress()
+
+    try:
+        if not model_path.exists():
+            raise FileNotFoundError(f"model_path does not exist: {model_path}")
+
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        update_status(phase="build-reranker-reference-embeddings")
+
+        with log_stage(
+            logger,
+            "build-reranker-reference-embeddings",
+            model_path=str(model_path),
+            embeddings_path=str(embeddings_path),
+            meta_path=str(meta_path),
+            config_path=str(config_path),
+        ):
+            summary = build_reranker_reference_embeddings(
+                model_path=model_path,
+                embeddings_out=embeddings_path,
+                meta_out=meta_path,
+                config_out=config_path,
+                train_limit=payload.train_limit,
+                val_limit=payload.val_limit,
+                test_limit=payload.test_limit,
+                index_all_prepared=payload.index_all_prepared,
+                window_seconds=payload.window_seconds,
+                hop_seconds=payload.hop_seconds,
+                batch_size=payload.batch_size,
+            )
+
+        update_status(
+            phase="done",
+            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            last_success=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            progress={
+                "run_dir": str(run_dir),
+                "model_path": str(model_path),
+                "embeddings_path": str(embeddings_path),
+                "meta_path": str(meta_path),
+                "config_path": str(config_path),
+                "summary": summary,
+            },
+        )
+
+    except Exception as exc:
+        update_status(
+            phase="failed",
+            finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            last_error=str(exc),
+            progress={
+                "run_dir": str(run_dir),
+                "model_path": str(model_path),
+            },
+        )
+        logger.exception("Build reranker reference embeddings failed")
+
+    finally:
+        pipeline_in_progress = False
+
+
+@app.post("/pipeline/build-reranker-reference-embeddings", response_model=AsyncJobResponse)
+async def build_reranker_reference_embeddings_endpoint(
+    payload: BuildRerankerReferenceEmbeddingsRequest,
+    background_tasks: BackgroundTasks,
+):
+    if pipeline_in_progress:
+        raise HTTPException(status_code=409, detail="Pipeline job is already running")
+
+    background_tasks.add_task(run_build_reranker_reference_embeddings, payload)
 
     return AsyncJobResponse(
         accepted=True,

@@ -188,3 +188,41 @@ class EvaluateArtifactsRequest(BaseModel):
     aggregation_strategies: list[str] = Field(
         default_factory=lambda: ["max"]
     )
+
+class EvaluateRerankerRequest(BaseModel):
+    output_metrics_path: str = "/app/artifacts/eval/reranker_metrics.json"
+    output_results_path: str = "/app/artifacts/eval/reranker_results.jsonl"
+
+    val_limit: int = 500
+    test_limit: int = 0
+    query_limit: int = 100
+
+    top_k: int = 50
+    reranker_max_candidates: int = 20
+
+    cases: list[str] = Field(default_factory=lambda: ["clean", "noisy", "phone_noisy"])
+
+    segment_seconds: float = 15.0
+
+    fp_weight: float = 0.95
+    ml_weight: float = 0.05
+
+    timeout_sec: float = 60.0
+
+class BuildRerankerReferenceEmbeddingsRequest(BaseModel):
+    model_path: str
+    run_dir: str
+
+    embeddings_filename: str = "reranker_ref_embeddings.npy"
+    meta_filename: str = "reranker_ref_meta.jsonl"
+    config_filename: str = "reranker_ref_config.json"
+
+    index_all_prepared: bool = True
+
+    train_limit: int = Field(default=0, ge=0)
+    val_limit: int = Field(default=0, ge=0)
+    test_limit: int = Field(default=0, ge=0)
+
+    window_seconds: float = Field(default=15.0, gt=0)
+    hop_seconds: float = Field(default=2.0, gt=0)
+    batch_size: int = Field(default=64, ge=1, le=512)

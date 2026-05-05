@@ -53,7 +53,9 @@ services:
     entrypoint: >
       /bin/sh -c "
       until mc alias set local http://minio:9000 minio minio123; do sleep 2; done &&
-      mc mb --ignore-existing local/tracks
+      mc mb --ignore-existing local/tracks &&
+      mc mb --ignore-existing local/full-tracks &&
+      mc mb --ignore-existing local/recognition-queries
       "
 
   kafka:
@@ -76,6 +78,10 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
+      KAFKA_SOCKET_REQUEST_MAX_BYTES: 104857600
 
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       ALLOW_PLAINTEXT_LISTENER: "yes"
@@ -167,6 +173,8 @@ services:
       FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
       COMBINED_RESULTS_PATH: /app/artifacts/eval/combined_eval_results.jsonl
       COMBINED_METRICS_PATH: /app/artifacts/eval/combined_eval_metrics.json
+      KAFKA_MAX_PARTITION_FETCH_BYTES: 10485760
+      KAFKA_FETCH_MAX_BYTES: 10485760
     ports:
       - "8010:8010"
     volumes:
@@ -215,6 +223,10 @@ services:
       EVAL_METRICS_PATH: /app/artifacts/eval/eval_metrics.json
       THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
       TORCHAUDIO_MEL_DEVICE: "cpu"
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      ML_RERANKER_SERVICE_URL: http://ml-reranker-service:8010
+      RERANK_EVAL_QUERY_BUCKET: recognition-queries
+      RERANK_EVAL_REFERENCE_BUCKET: full-tracks
     ports:
       - "8011:8011"
     volumes:
@@ -262,6 +274,61 @@ services:
       - ml_prepared_data:/app/prepared-data
       - eval_artifacts:/app/eval
 
+  ml-reranker-service:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    build:
+      context: ./ml-reranker-service
+      dockerfile: Dockerfile
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      ML_RERANKER_S3_ENDPOINT: http://minio:9000
+      ML_RERANKER_S3_ACCESS_KEY: minio
+      ML_RERANKER_S3_SECRET_KEY: minio123
+
+      ML_RERANKER_QUERY_AUDIO_BUCKET: recognition-queries
+      ML_RERANKER_REFERENCE_AUDIO_BUCKET: full-tracks
+
+      ML_RERANKER_MODEL_PATH: /app/models/active/model.pt
+      ML_RERANKER_EMB_DIM: 128
+
+      ML_RERANKER_SR: 16000
+      ML_RERANKER_SEGMENT_SECONDS: 15.0
+
+      ML_RERANKER_N_MELS: 96
+      ML_RERANKER_N_FFT: 1024
+      ML_RERANKER_HOP_LENGTH: 256
+      ML_RERANKER_WIN_LENGTH: 1024
+      ML_RERANKER_FMIN: 20
+
+      ML_RERANKER_MAX_CANDIDATES: 20
+      ML_RERANKER_FINGERPRINT_OFFSET_HOP_SECONDS: 1.0
+      ML_RERANKER_OFFSET_JITTER_SECONDS: "-0.75,0.0,0.75"
+
+      ML_RERANKER_FP_WEIGHT: 0.95
+      ML_RERANKER_ML_WEIGHT: 0.05
+      ML_RERANKER_NO_MATCH_THRESHOLD: 0.45
+      ML_RERANKER_DEBUG_UPLOAD_ENABLED: "true"
+
+      ML_RERANKER_REF_EMBEDDINGS_PATH: /app/models/active/reranker_ref_embeddings.npy
+      ML_RERANKER_REF_META_PATH: /app/models/active/reranker_ref_meta.jsonl
+      ML_RERANKER_REF_CONFIG_PATH: /app/models/active/reranker_ref_config.json
+      ML_RERANKER_USE_PRECOMPUTED_REFERENCE_EMBEDDINGS: "true"
+      ML_RERANKER_REF_NEIGHBOR_WINDOWS: 1
+      ML_RERANKER_REF_FALLBACK_TO_AUDIO: "true"
+    ports:
+      - "8030:8010"
+    volumes:
+      - ml_artifacts:/app/models:ro
+    shm_size: "1gb"
+
   orchestration-service:
     build:
       context: ./orchestration-service
@@ -287,6 +354,8 @@ services:
       ML_TIMEOUT_MS: 15000
       JWT_SECRET: supersecretkeysupersecretkeysupersecretkey123456
       JWT_EXPIRATION: 86400000
+      SPRING_KAFKA_PRODUCER_PROPERTIES_MAX_REQUEST_SIZE: 10485760 # 10 MB
+      SPRING_KAFKA_PRODUCER_PROPERTIES_BUFFER_MEMORY: 33554432
     ports:
       - "8080:8080"
 

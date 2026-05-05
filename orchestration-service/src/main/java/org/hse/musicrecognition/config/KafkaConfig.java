@@ -28,13 +28,19 @@ public class KafkaConfig {
 
     @Bean
     public ProducerFactory<String, MlRecognitionRequest> mlRequestProducerFactory(
-            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers
+            @Value("${spring.kafka.bootstrap-servers}") String bootstrapServers,
+            @Value("${spring.kafka.producer.properties.max.request.size:10485760}") int maxRequestSize,
+            @Value("${spring.kafka.producer.properties.buffer.memory:33554432}") long bufferMemory
     ) {
         Map<String, Object> config = new HashMap<>();
         config.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         config.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         config.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
         config.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
+
+        config.put(ProducerConfig.MAX_REQUEST_SIZE_CONFIG, maxRequestSize);
+        config.put(ProducerConfig.BUFFER_MEMORY_CONFIG, bufferMemory);
+
         return new DefaultKafkaProducerFactory<>(config);
     }
 

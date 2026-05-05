@@ -34,7 +34,7 @@ public class FingerprintClient {
         body.add("file", resource);
 
         return restClient.post()
-                .uri(fingerprintUrl + "/index")
+                .uri(fingerprintUrl + "/recognize")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(body)
                 .retrieve()
