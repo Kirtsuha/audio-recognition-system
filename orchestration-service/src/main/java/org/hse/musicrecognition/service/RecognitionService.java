@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.hse.musicrecognition.config.RecognitionProperties;
 import org.hse.musicrecognition.dto.*;
 import org.hse.musicrecognition.exception.BadRequestException;
+import org.hse.musicrecognition.exception.ExternalServiceUnavailableException;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
@@ -49,16 +50,6 @@ public class RecognitionService {
         );
 
         RecognitionResponse response;
-
-        log.info(
-                "Calling ML reranker requestId={} queryAudio={}/{} referenceBucket={} fingerprintMatched={} candidates={}",
-                requestId,
-                storedAudio.bucket(),
-                storedAudio.key(),
-                recognitionProperties.getStorage().getReferenceAudioBucket(),
-                fingerprint == null ? null : fingerprint.matched(),
-                fingerprint == null || fingerprint.candidates() == null ? 0 : fingerprint.candidates().size()
-        );
 
         if (fingerprint != null && fingerprint.isMatched()) {
             response = buildFingerprintResponse(fingerprint);
@@ -141,7 +132,28 @@ public class RecognitionService {
                 fingerprint == null || fingerprint.candidates() == null ? 0 : fingerprint.candidates().size()
         );
 
-        MlRerankResponse rerank = mlRerankerClient.rerank(request);
+        MlRerankResponse rerank;
+
+        try {
+            rerank = mlRerankerClient.rerank(request);
+        } catch (ExternalServiceUnavailableException exc) {
+            log.warn(
+                    "ML reranker failed; returning fingerprint not-found fallback requestId={} queryAudio={}/{}",
+                    requestId,
+                    storedAudio.bucket(),
+                    storedAudio.key(),
+                    exc
+            );
+
+            return new RecognitionResponse(
+                    false,
+                    null,
+                    null,
+                    null,
+                    resolveRerankNotFoundConfidence(null, fingerprint),
+                    "ml-reranker-unavailable"
+            );
+        }
 
         if (rerank == null || !rerank.isMatched() || rerank.best() == null) {
             double confidence = resolveRerankNotFoundConfidence(rerank, fingerprint);

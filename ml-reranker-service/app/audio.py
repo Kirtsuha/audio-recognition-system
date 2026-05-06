@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import logging
+import os
+import tempfile
 from pathlib import Path
 
 import librosa
@@ -23,15 +25,21 @@ SUPPORTED_AUDIO_SUFFIXES = {
 }
 
 
+class AudioDecodeError(RuntimeError):
+    pass
+
+
 def validate_audio_key(key: str) -> None:
     suffix = Path(key).suffix.lower()
     if suffix not in SUPPORTED_AUDIO_SUFFIXES:
         raise ValueError(f"Unsupported audio suffix={suffix}; supported={sorted(SUPPORTED_AUDIO_SUFFIXES)}")
 
 
-def load_audio_from_bytes(data: bytes, sample_rate: int | None = None) -> np.ndarray:
-
-
+def load_audio_from_bytes(
+    data: bytes,
+    sample_rate: int | None = None,
+    suffix: str | None = None,
+    ) -> np.ndarray:
     target_sr = sample_rate or settings.sr
     bio = io.BytesIO(data)
 
@@ -45,9 +53,31 @@ def load_audio_from_bytes(data: bytes, sample_rate: int | None = None) -> np.nda
     except Exception:
         logger.debug("soundfile decode failed; trying librosa", exc_info=True)
 
-    bio.seek(0)
-    audio, _ = librosa.load(bio, sr=target_sr, mono=True)
-    return normalize_audio(audio)
+    try:
+        bio.seek(0)
+        audio, _ = librosa.load(bio, sr=target_sr, mono=True)
+        return normalize_audio(audio)
+    except Exception:
+        logger.debug("librosa bytes decode failed; trying temporary file", exc_info=True)
+
+    tmp_path = None
+    safe_suffix = suffix if suffix and suffix.startswith(".") else ".audio"
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=safe_suffix) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+
+        audio, _ = librosa.load(tmp_path, sr=target_sr, mono=True)
+        return normalize_audio(audio)
+    except Exception as exc:
+        raise AudioDecodeError("Failed to decode audio bytes") from exc
+    finally:
+        if tmp_path is not None:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                logger.debug("Failed to remove temporary audio file path=%s", tmp_path, exc_info=True)
 
 
 def normalize_audio(audio: np.ndarray) -> np.ndarray:
