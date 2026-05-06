@@ -274,6 +274,55 @@ input:focus {
   gap: 16px;
 }
 
+.input-stack {
+  display: grid;
+  gap: 20px;
+}
+
+.recorder-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.recording-meter {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid #e3e8ed;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fafb;
+}
+
+.record-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #9aa6b2;
+}
+
+.record-dot.active {
+  background: #b23b45;
+  box-shadow: 0 0 0 5px rgba(178, 59, 69, 0.14);
+}
+
+.recording-preview {
+  display: grid;
+  gap: 12px;
+}
+
+.recording-preview audio,
+.audio-player-box audio {
+  width: 100%;
+}
+
 .panel-heading {
   margin-bottom: 18px;
 }
@@ -445,6 +494,73 @@ input:focus {
   margin-top: 24px;
 }
 
+.search-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.search-form label {
+  display: grid;
+  gap: 8px;
+  font-weight: 800;
+  color: #36424f;
+}
+
+.track-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.track-card {
+  display: grid;
+  gap: 16px;
+  border: 1px solid #e3e8ed;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.track-card-main h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.track-card-main p {
+  margin: 0;
+  color: #66737f;
+}
+
+.compact-details {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.compact-details div {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.compact-details dt {
+  color: #66737f;
+  font-weight: 800;
+}
+
+.compact-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.audio-player-box {
+  display: grid;
+  gap: 10px;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -457,7 +573,7 @@ input:focus {
   }
 
   .nav-list {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .sidebar-logout {
@@ -499,5 +615,9 @@ input:focus {
 
   .profile-actions {
     flex-direction: column;
+  }
+
+  .search-form {
+    grid-template-columns: 1fr;
   }
 }

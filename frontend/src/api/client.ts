@@ -90,6 +90,33 @@ async function request<T>(
   return payload as T;
 }
 
+async function requestBlob(path: string): Promise<Blob> {
+  const headers = new Headers();
+  const token = getStoredToken();
+
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, { headers });
+
+  if (response.status === 401) {
+    clearStoredToken();
+    window.dispatchEvent(new Event("auth:expired"));
+  }
+
+  if (!response.ok) {
+    const payload = await parseResponse(response);
+    throw new ApiError(
+      errorMessage(payload, `Request failed with status ${response.status}`),
+      response.status,
+      payload,
+    );
+  }
+
+  return response.blob();
+}
+
 export const api = {
   login(username: string, password: string) {
     return request<AuthResponse>(
@@ -150,15 +177,22 @@ export const api = {
     });
   },
 
-  searchTracksByTitle(title: string, limit = 20) {
-    const params = new URLSearchParams({
-      title,
-      limit: String(limit),
-    });
+  searchTracks(query: string, artist = "", limit = 20) {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (query.trim()) {
+      params.set("query", query.trim());
+    }
+    if (artist.trim()) {
+      params.set("artist", artist.trim());
+    }
     return request<TrackSearchResponse>(`/api/tracks/search?${params}`);
   },
 
   getTrack(id: number | string) {
     return request<Track>(`/api/tracks/${id}`);
+  },
+
+  getTrackAudio(id: number | string) {
+    return requestBlob(`/api/tracks/${id}/audio`);
   },
 };

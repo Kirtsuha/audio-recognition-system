@@ -66,12 +66,13 @@ public class FingerprintClient {
         }
     }
 
-    public TrackSearchResponse searchTracksByTitle(String title, int limit) {
+    public TrackSearchResponse searchTracks(String query, String artist, int limit) {
         try {
             return restClient.get()
                     .uri(
-                            fingerprintUrl + "/tracks/search/by-title?title={title}&limit={limit}",
-                            title,
+                            fingerprintUrl + "/tracks/search?query={query}&artist={artist}&limit={limit}",
+                            query == null ? "" : query,
+                            artist == null ? "" : artist,
                             limit
                     )
                     .retrieve()

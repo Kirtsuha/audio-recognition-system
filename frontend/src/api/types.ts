@@ -34,6 +34,7 @@ export type Track = {
   title: string | null;
   artist: string | null;
   album: string | null;
+  durationSec?: number | null;
   s3Key: string | null;
 };
 

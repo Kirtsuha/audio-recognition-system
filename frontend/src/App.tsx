@@ -6,6 +6,7 @@ import { LoginPage } from "./pages/LoginPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { RecognitionPage } from "./pages/RecognitionPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { SearchPage } from "./pages/SearchPage";
 
 export function App() {
   return (
@@ -16,6 +17,7 @@ export function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
           <Route path="/recognition" element={<RecognitionPage />} />
+          <Route path="/search" element={<SearchPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>

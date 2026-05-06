@@ -3,6 +3,7 @@ import { useAuth } from "../auth/AuthContext";
 
 const navItems = [
   { to: "/recognition", label: "Recognition" },
+  { to: "/search", label: "Search" },
   { to: "/history", label: "History" },
   { to: "/profile", label: "Profile" },
 ];
