@@ -7,6 +7,7 @@ public record TrackMetadataResponse(
         Integer trackId,
         String title,
         String artist,
+        String album,
         @JsonProperty("s3_key")
         String s3Key
 ) {

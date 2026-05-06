@@ -28,7 +28,7 @@ class ExperimentRunRequest(BaseModel):
     index_all_prepared: bool = False
 
     fixed_eval_set_name: str = Field(default="default", min_length=1, max_length=100)
-    eval_noise_mode: str = Field(default="both")  # clean | noisy | phone_noisy | both | all
+    eval_noise_mode: str = Field(default="both")
 
     select_best_checkpoint: bool = False
     best_checkpoint_metric: str = "recall_at_1"
@@ -55,7 +55,7 @@ class FullRunRequest(BaseModel):
 
     eval_query_limit: int = Field(default=500, ge=0)
     fixed_eval_set_name: str = Field(default="prod_val500_v1", min_length=1, max_length=100)
-    eval_noise_mode: str = Field(default="noisy")  # clean | noisy | both
+    eval_noise_mode: str = Field(default="noisy")
     aggregation_strategies: list[str] = Field(
         default_factory=lambda: ["max", "support", "hybrid_v2", "current"]
     )
@@ -161,7 +161,7 @@ class BuildFaissOnlyRequest(BaseModel):
     index_filename: str = "faiss.index"
     meta_filename: str = "faiss_meta.json"
 
-    index_type: str | None = None  # flat | ivf_flat | None => from config
+    index_type: str | None = None
     nlist: int | None = Field(default=None, ge=1)
     nprobe: int | None = Field(default=None, ge=1)
 
@@ -183,8 +183,46 @@ class EvaluateArtifactsRequest(BaseModel):
     use_full_query_audio: bool = False
 
     fixed_eval_set_name: str = "prod_val500_v1"
-    eval_noise_mode: str = "noisy"  # clean | noisy | phone_noisy | both | all
+    eval_noise_mode: str = "noisy"
 
     aggregation_strategies: list[str] = Field(
         default_factory=lambda: ["max"]
     )
+
+class EvaluateRerankerRequest(BaseModel):
+    output_metrics_path: str = "/app/artifacts/eval/reranker_metrics.json"
+    output_results_path: str = "/app/artifacts/eval/reranker_results.jsonl"
+
+    val_limit: int = 500
+    test_limit: int = 0
+    query_limit: int = 100
+
+    top_k: int = 50
+    reranker_max_candidates: int = 20
+
+    cases: list[str] = Field(default_factory=lambda: ["clean", "noisy", "phone_noisy"])
+
+    segment_seconds: float = 15.0
+
+    fp_weight: float = 0.95
+    ml_weight: float = 0.05
+
+    timeout_sec: float = 60.0
+
+class BuildRerankerReferenceEmbeddingsRequest(BaseModel):
+    model_path: str
+    run_dir: str
+
+    embeddings_filename: str = "reranker_ref_embeddings.npy"
+    meta_filename: str = "reranker_ref_meta.jsonl"
+    config_filename: str = "reranker_ref_config.json"
+
+    index_all_prepared: bool = True
+
+    train_limit: int = Field(default=0, ge=0)
+    val_limit: int = Field(default=0, ge=0)
+    test_limit: int = Field(default=0, ge=0)
+
+    window_seconds: float = Field(default=15.0, gt=0)
+    hop_seconds: float = Field(default=2.0, gt=0)
+    batch_size: int = Field(default=64, ge=1, le=512)

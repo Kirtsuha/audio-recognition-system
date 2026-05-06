@@ -6,7 +6,8 @@ from config.config import (
     MIN_ALIGNED_MATCHES,
     MIN_QUERY_COVERAGE,
     MIN_SCORE_GAP,
-    OFFSET_TOLERANCE_FRAMES, OFFSET_BIN,
+    OFFSET_TOLERANCE_FRAMES,
+    OFFSET_BIN, HOP_LENGTH, SAMPLE_RATE,
 )
 
 @dataclass
@@ -14,6 +15,7 @@ class MatchDecision:
     matched: bool
     track_id: int | None = None
     offset: int | None = None
+    offset_sec: float | None = None
     aligned_matches: int = 0
     second_aligned_matches: int = 0
     query_hashes: int = 0
@@ -59,7 +61,6 @@ def _confidence(best: int, second: int, query_hashes: int, unique_query_hashes: 
     uniqueness = best / max(1, unique_query_hashes)
     separation = best / max(1, second)
 
-    # Консервативная эвристика.
     score = (
         0.50 * min(1.0, coverage / 0.08)
         + 0.30 * min(1.0, uniqueness / 0.12)
@@ -68,10 +69,7 @@ def _confidence(best: int, second: int, query_hashes: int, unique_query_hashes: 
     return round(float(max(0.0, min(1.0, score))), 4)
 
 
-def match(hashes, db) -> dict:
-    if not hashes:
-        return MatchDecision(matched=False, reason="no_hashes").__dict__
-
+def _collect_votes(hashes, db) -> tuple[dict, int, int]:
     query_offsets_by_hash = defaultdict(list)
     for h, t in hashes:
         query_offsets_by_hash[int(h)].append(int(t))
@@ -90,82 +88,175 @@ def match(hashes, db) -> dict:
             for query_offset in query_offsets_by_hash[int(h)]:
                 delta = int(db_offset) - int(query_offset)
                 delta_q = delta // OFFSET_BIN
-                votes[(int(track_id), delta_q)] += 1
+                votes[(int(track_id), int(delta_q))] += 1
+
+    return votes, len(hashes), len(hash_values)
+
+
+def retrieve_candidates(hashes, db, top_k: int = 50) -> dict:
+    if not hashes:
+        return {
+            "query_hashes": 0,
+            "unique_query_hashes": 0,
+            "candidates": [],
+            "reason": "no_hashes",
+        }
+
+    votes, query_hashes, unique_query_hashes = _collect_votes(hashes, db)
 
     if not votes:
-        return MatchDecision(
-            matched=False,
-            query_hashes=len(hashes),
-            unique_query_hashes=len(hash_values),
-            reason="no_votes",
-        ).__dict__
+        return {
+            "query_hashes": query_hashes,
+            "unique_query_hashes": unique_query_hashes,
+            "candidates": [],
+            "reason": "no_votes",
+        }
+
     votes = _aggregate_offset_votes(votes)
 
-    track_scores = defaultdict(int)
+    by_track = defaultdict(list)
 
-    for (candidate_track_id, _offset), count in votes.items():
-        if count > track_scores[candidate_track_id]:
-            track_scores[candidate_track_id] = count
+    for (track_id, offset), count in votes.items():
+        by_track[int(track_id)].append(
+            {
+                "offset": int(offset),
+                "aligned_matches": int(count),
+            }
+        )
 
-    ranked_tracks = sorted(track_scores.items(), key=lambda x: x[1], reverse=True)
+    raw_candidates = []
 
-    best_track_id, best_track_score = ranked_tracks[0]
-    second_track_score = ranked_tracks[1][1] if len(ranked_tracks) > 1 else 0
+    for track_id, offsets in by_track.items():
+        offsets = sorted(
+            offsets,
+            key=lambda x: x["aligned_matches"],
+            reverse=True,
+        )
 
-    best_offsets = [
-        ((track_id, offset), count)
-        for (track_id, offset), count in votes.items()
-        if track_id == best_track_id
-    ]
+        best = offsets[0]
+        total_matches = sum(x["aligned_matches"] for x in offsets)
+        offset_count = len(offsets)
 
-    (track_id, offset), best = max(best_offsets, key=lambda x: x[1])
-    second = second_track_score
+        best_offset = int(best["offset"])
 
+        raw_candidates.append(
+            {
+                "track_id": int(track_id),
+                "best_offset": best_offset,
+                "best_offset_sec": offset_bin_to_seconds(best_offset),
+                "aligned_matches": int(best["aligned_matches"]),
+                "total_matches": int(total_matches),
+                "offset_count": int(offset_count),
+                "coverage": float(best["aligned_matches"] / max(1, query_hashes)),
+                "unique_coverage": float(best["aligned_matches"] / max(1, unique_query_hashes)),
+                "top_offsets": [
+                    {
+                        **x,
+                        "offset_sec": offset_bin_to_seconds(x["offset"]),
+                    }
+                    for x in offsets[:5]
+                ],
+            }
+        )
+
+    raw_candidates.sort(
+        key=lambda x: (
+            x["aligned_matches"],
+            x["total_matches"],
+            x["coverage"],
+        ),
+        reverse=True,
+    )
+
+    top = raw_candidates[:top_k]
+
+    best_score = top[0]["aligned_matches"] if top else 0
+    second_score = top[1]["aligned_matches"] if len(top) > 1 else 0
+
+    for candidate in top:
+        candidate["score_gap"] = round(
+            float(candidate["aligned_matches"] / max(1, second_score)),
+            4,
+        )
+        candidate["confidence"] = _confidence(
+            candidate["aligned_matches"],
+            second_score,
+            query_hashes,
+            unique_query_hashes,
+        )
+
+    return {
+        "query_hashes": query_hashes,
+        "unique_query_hashes": unique_query_hashes,
+        "top_k": top_k,
+        "candidates": top,
+        "reason": None if top else "no_candidates",
+        "best_aligned_matches": int(best_score),
+        "second_aligned_matches": int(second_score),
+    }
+
+def offset_bin_to_seconds(offset_bin: int | float) -> float:
+    frame_offset = float(offset_bin) * float(OFFSET_BIN)
+    seconds = frame_offset * float(HOP_LENGTH) / float(SAMPLE_RATE)
+    return round(seconds, 6)
+
+def match(hashes, db) -> dict:
+    retrieved = retrieve_candidates(hashes, db, top_k=5)
+
+    candidates = retrieved.get("candidates") or []
+
+    if not candidates:
+        return MatchDecision(
+            matched=False,
+            query_hashes=retrieved.get("query_hashes", 0),
+            unique_query_hashes=retrieved.get("unique_query_hashes", 0),
+            reason=retrieved.get("reason"),
+        ).__dict__
+
+    best_candidate = candidates[0]
+    second = retrieved.get("second_aligned_matches", 0)
+
+    track_id = int(best_candidate["track_id"])
+    offset = int(best_candidate["best_offset"])
+    offset_sec = float(best_candidate.get("best_offset_sec", offset_bin_to_seconds(offset)))
+    best = int(best_candidate["aligned_matches"])
     score_gap = best / max(1, second)
-    confidence = _confidence(best, second, len(hashes), len(hash_values))
+
+    confidence = _confidence(
+        best,
+        second,
+        retrieved["query_hashes"],
+        retrieved["unique_query_hashes"],
+    )
 
     accepted = (
         best >= MIN_ALIGNED_MATCHES
-        and (best / max(1, len(hashes))) >= MIN_QUERY_COVERAGE
+        and (best / max(1, retrieved["query_hashes"])) >= MIN_QUERY_COVERAGE
         and score_gap >= MIN_SCORE_GAP
     )
 
-    if not accepted:
-        return MatchDecision(
-            matched=False,
-            track_id=track_id,
-            offset=offset,
-            aligned_matches=best,
-            second_aligned_matches=second,
-            query_hashes=len(hashes),
-            unique_query_hashes=len(hash_values),
-            confidence=confidence,
-            score_gap=round(float(score_gap), 4),
-            reason="low_confidence",
-            top_candidates=[
-                {
-                    "track_id": int(track_id),
-                    "aligned_matches": int(score),
-                }
-                for track_id, score in ranked_tracks[:5]
-            ]
-        ).__dict__
-
     return MatchDecision(
-        matched=True,
+        matched=accepted,
         track_id=track_id,
         offset=offset,
+        offset_sec=offset_sec,
         aligned_matches=best,
         second_aligned_matches=second,
-        query_hashes=len(hashes),
-        unique_query_hashes=len(hash_values),
+        query_hashes=retrieved["query_hashes"],
+        unique_query_hashes=retrieved["unique_query_hashes"],
         confidence=confidence,
         score_gap=round(float(score_gap), 4),
+        reason=None if accepted else "low_confidence",
         top_candidates=[
             {
-                "track_id": int(track_id),
-                "aligned_matches": int(score),
+                "track_id": int(x["track_id"]),
+                "aligned_matches": int(x["aligned_matches"]),
+                "total_matches": int(x["total_matches"]),
+                "best_offset": int(x["best_offset"]),
+                "best_offset_sec": float(x.get("best_offset_sec", offset_bin_to_seconds(x["best_offset"]))),
+                "coverage": x["coverage"],
+                "confidence": x["confidence"],
             }
-            for track_id, score in ranked_tracks[:5]
-        ]
+            for x in candidates
+        ],
     ).__dict__

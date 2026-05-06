@@ -27,12 +27,8 @@ def prepare_data(
     prepare_limit: int = 0,
     skip_existing: bool = True,
 ) -> dict:
-    """
-    Production-safe prepare.
 
-    append оставлен для совместимости, но manifest больше не очищается по умолчанию.
-    Если нужен полный rebuild prepared-data, лучше явно удалить PREPARED_DATASET_DIR.
-    """
+
     PREPARED_TRACKS_DIR.mkdir(parents=True, exist_ok=True)
 
     existing_manifest_map = load_prepared_manifest_map()

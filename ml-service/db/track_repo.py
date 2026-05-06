@@ -1,5 +1,5 @@
 import os
-from typing import Dict, List
+from typing import List
 
 import psycopg
 
@@ -9,21 +9,6 @@ def get_tracks_database_url() -> str:
     if not value:
         raise RuntimeError("TRACKS_DATABASE_URL is not set")
     return value
-
-
-def load_track_mapping_by_s3_key() -> Dict[str, int]:
-    sql = "SELECT id, s3_key FROM track"
-
-    mapping: Dict[str, int] = {}
-    with psycopg.connect(get_tracks_database_url()) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-            for row in cur.fetchall():
-                track_id, s3_key = row
-                if s3_key:
-                    mapping[str(s3_key)] = int(track_id)
-
-    return mapping
 
 
 def load_tracks() -> List[dict]:

@@ -35,12 +35,13 @@ def object_exists(key: str, bucket: str | None = None) -> bool:
         s3.head_object(Bucket=bucket_name, Key=key)
         return True
     except ClientError as exc:
-        if exc.response["Error"]["Code"] in {"404", "NoSuchKey"}:
+        if exc.response["Error"]["Code"] in {"404", "NoSuchKey", "NotFound"}:
             return False
         raise
 
 
-def upload_fileobj(fileobj, key):
+def upload_fileobj(fileobj, key, bucket: str | None = None, metadata: dict | None = None):
     s3 = get_s3()
-    bucket = os.getenv("S3_BUCKET")
-    s3.upload_fileobj(fileobj, bucket, key)
+    bucket_name = bucket or os.getenv("S3_BUCKET")
+    extra_args = {"Metadata": metadata} if metadata else None
+    s3.upload_fileobj(fileobj, bucket_name, key, ExtraArgs=extra_args)

@@ -26,3 +26,7 @@ MIN_SCORE_GAP = float(os.getenv("FP_MIN_SCORE_GAP", "1.2"))
 _raw_index_duration = os.getenv("FP_INDEX_DURATION_SEC", "")
 INDEX_DURATION_SEC = None if _raw_index_duration == "" else float(_raw_index_duration)
 
+S3_BUCKET = os.getenv("S3_BUCKET", "full-tracks")
+S3_PREFIX = os.getenv("S3_FULL_PREFIX", "").strip("/")
+if S3_PREFIX:
+    S3_PREFIX = S3_PREFIX + "/"

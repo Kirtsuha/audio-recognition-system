@@ -29,7 +29,7 @@ def _run_sort_key(path: Path) -> float:
 
 
 def _is_failed_run(run_dir: Path) -> bool:
-    # Простая эвристика: нет model.pt/faiss.index/metrics.json.
+
     required_any = ["model.pt", "metrics.json", "faiss.index"]
     return not any((run_dir / name).exists() for name in required_any)
 

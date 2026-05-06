@@ -9,7 +9,6 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 import java.security.Principal;
 
 @RestController
@@ -20,16 +19,27 @@ public class RecognitionController {
     private final RecognitionService recognitionService;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Operation(summary = "Распознать аудиофайл",
+    @Operation(
+            summary = "Распознать аудиофайл",
             description = "Принимает аудиофайл и возвращает информацию о треке",
-            responses = {@ApiResponse(responseCode = "200", description = "Распознано успешно")})
-    public RecognitionResponse recognize(@RequestPart("file") MultipartFile file //, Principal principal
-                                         ) throws Exception {
-        byte[] bytes = file.getBytes();
-
-        return recognitionService.recognize("UNAUTHORIZED", file.getOriginalFilename(), bytes); //TODO fix principals
-        //  recognitionService.recognize(principal.getName(), file.getOriginalFilename(), bytes);
+            responses = {
+                    @ApiResponse(responseCode = "200", description = "Запрос обработан"),
+                    @ApiResponse(responseCode = "400", description = "Некорректный файл"),
+                    @ApiResponse(responseCode = "401", description = "Пользователь не авторизован"),
+                    @ApiResponse(responseCode = "503", description = "Внешний сервис недоступен")
+            }
+    )
+    public RecognitionResponse recognize(
+            @RequestPart("file") MultipartFile file,
+            @RequestParam(value = "source", required = false, defaultValue = "upload") String source,
+            Principal principal
+    ) throws Exception {
+        return recognitionService.recognize(
+                principal.getName(),
+                file.getOriginalFilename(),
+                file.getContentType(),
+                source,
+                file.getBytes()
+        );
     }
-
 }
-

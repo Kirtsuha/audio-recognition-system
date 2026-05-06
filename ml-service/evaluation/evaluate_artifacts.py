@@ -85,17 +85,8 @@ def evaluate_artifacts(
     eval_noise_mode: str = "noisy",
     aggregation_strategies: list[str] | None = None,
 ) -> dict:
-    """
-    Fast eval over existing artifacts.
 
-    Unlike evaluate_prepared(), this DOES NOT rebuild embeddings or FAISS.
-    It loads:
-      - model.pt
-      - faiss.index
-      - song_ids.npy
 
-    Then it only builds query embeddings and runs index.search().
-    """
     started = time.time()
 
     output_metrics_path = Path(output_metrics_path)

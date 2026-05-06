@@ -3,7 +3,6 @@ import os
 import shutil
 import tempfile
 import time
-import zlib
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import PurePosixPath
@@ -13,16 +12,17 @@ import soundfile as sf
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from config.config import INDEX_DURATION_SEC
+from config.config import INDEX_DURATION_SEC, S3_PREFIX
 from repository.database_config import Base, engine
 from repository.db import get_db
 from repository.models import Fingerprint, Track
 from repository.s3_client import get_s3
+from scripts.s3_loader import decode_metadata, S3_BUCKET
 from service.audio2fingerprint import fingerprint_audio
 
 logger = logging.getLogger("fingerprint.indexer")
 
-AUDIO_EXT = (".mp3", ".wav", ".flac", ".ogg")
+AUDIO_EXT = (".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac")
 
 INDEX_WORKERS = int(os.getenv("FP_INDEX_WORKERS", "1"))
 INSERT_BATCH_SIZE = int(os.getenv("FP_INSERT_BATCH_SIZE", "10000"))
@@ -45,16 +45,6 @@ def get_tracks_metadata():
 
 def is_audio_file(path: str) -> bool:
     return path.lower().endswith(AUDIO_EXT)
-
-
-def extract_track_id_from_s3_key(s3_key: str) -> int:
-    filename = PurePosixPath(s3_key).name
-    stem = filename.split(".")[0]
-
-    if stem.isdigit():
-        return int(stem)
-
-    return zlib.crc32(s3_key.encode("utf-8")) & 0x7FFFFFFF
 
 
 def chunks(items, size):
@@ -84,31 +74,51 @@ def track_already_processed(db: Session, track_id: int) -> bool:
 
 def upload_track_to_db(
     db: Session,
-    track_id: int,
+    track_id: int | None,
     s3_key: str,
+    title: str | None = None,
+    artist: str | None = None,
+    album: str | None = None,
     duration_sec: float | None = None,
     fingerprint_count: int | None = None,
     commit: bool = True,
 ) -> Track:
     path = PurePosixPath(s3_key)
-    default_title = path.stem
-    default_artist = path.parent.name if path.parent.name else "unknown"
+    default_title = title or path.stem
+    default_artist = artist or (path.parent.name if path.parent.name else "unknown")
 
     metadata = get_tracks_metadata()
 
-    try:
-        title = metadata.loc[track_id, ("track", "title")]
-    except Exception:
+    if title is None and track_id is not None:
+        try:
+            title = metadata.loc[track_id, ("track", "title")]
+        except Exception:
+            title = default_title
+    else:
         title = default_title
 
-    try:
-        artist = metadata.loc[track_id, ("artist", "name")]
-    except Exception:
+    if artist is None and track_id is not None:
+        try:
+            artist = metadata.loc[track_id, ("artist", "name")]
+        except Exception:
+            artist = default_artist
+    else:
         artist = default_artist
 
-    existing = db.query(Track).filter(Track.id == track_id).first()
+    existing = None
+
+    if track_id is not None:
+        existing = db.query(Track).filter(Track.id == track_id).first()
+
+    if existing is None:
+        existing = db.query(Track).filter(Track.s3_key == s3_key).first()
 
     if existing:
+        existing.title = str(title)
+        existing.artist = str(artist)
+        if album is not None:
+            existing.album = album
+        existing.s3_key = s3_key
         existing.duration_sec = (
             int(duration_sec) if duration_sec is not None else existing.duration_sec
         )
@@ -122,14 +132,19 @@ def upload_track_to_db(
 
         return existing
 
-    track = Track(
-        id=track_id,
+    track_kwargs = dict(
         title=str(title),
         artist=str(artist),
+        album=album,
         s3_key=s3_key,
         duration_sec=int(duration_sec) if duration_sec is not None else None,
         fingerprint_count=fingerprint_count,
     )
+
+    if track_id is not None:
+        track_kwargs["id"] = track_id
+
+    track = Track(**track_kwargs)
 
     db.add(track)
 
@@ -145,22 +160,17 @@ def upload_track_to_db(
 def _fingerprint_s3_track_worker(
     s3_key: str,
     s3_bucket: str,
+    track_id: int,
 ) -> dict:
-    """
-    Worker process:
-    - creates its own S3 client
-    - downloads track
-    - calculates duration
-    - calculates fingerprint hashes
-    - returns pure dict, no DB objects
-    """
+
+
     worker_s3 = get_s3()
-    track_id = extract_track_id_from_s3_key(s3_key)
 
     timings = {}
     started = time.perf_counter()
 
     obj = worker_s3.get_object(Bucket=s3_bucket, Key=s3_key)
+    metadata_title, metadata_artist = decode_metadata(obj.get("Metadata"))
     audio_stream = BytesIO(obj["Body"].read())
     timings["download_sec"] = time.perf_counter() - started
 
@@ -182,6 +192,8 @@ def _fingerprint_s3_track_worker(
         "status": "fingerprinted",
         "track_id": track_id,
         "s3_key": s3_key,
+        "title": metadata_title,
+        "artist": metadata_artist,
         "duration_sec": duration_sec,
         "hashes": [(int(h), int(t)) for h, t in hashes],
         "hash_count": len(hashes),
@@ -195,17 +207,17 @@ def _fingerprint_s3_track_worker(
 
 
 def insert_fingerprint_result(db: Session, result: dict) -> dict:
-    """
-    Main process only:
-    - writes Track
-    - writes Fingerprint rows
-    """
+
+
     t0 = time.perf_counter()
 
     track = upload_track_to_db(
         db=db,
         track_id=int(result["track_id"]),
         s3_key=result["s3_key"],
+        title=result.get("title"),
+        artist=result.get("artist"),
+        album=result.get("album"),
         duration_sec=result.get("duration_sec"),
         fingerprint_count=int(result.get("hash_count") or 0),
         commit=False,
@@ -251,29 +263,26 @@ def insert_fingerprint_result(db: Session, result: dict) -> dict:
         "timings": result["timings"],
     }
 
-def load_existing_track_ids(db: Session) -> set[int]:
-    started = time.perf_counter()
-    rows = db.query(Track.id).all()
-    ids = {int(row[0]) for row in rows}
-
-    logger.info(
-        "Loaded existing track ids count=%s elapsed_sec=%.2f",
-        len(ids),
-        time.perf_counter() - started,
+def prepare_track_for_indexing(db: Session, s3_key: str) -> Track:
+    track = upload_track_to_db(
+        db=db,
+        track_id=None,
+        s3_key=s3_key,
+        commit=True,
     )
 
-    return ids
+    return track
 
 
 def process_s3_track(s3_key: str, db: Session, s3_bucket: str, s3_prefix: str = "") -> dict:
-    """
-    Sequential mode. Useful for debugging and INDEX_WORKERS=1.
-    """
+
+
     if not is_audio_file(s3_key):
         logger.info("Skipping non-audio object: %s", s3_key)
         return {"status": "ignored", "s3_key": s3_key}
 
-    track_id = extract_track_id_from_s3_key(s3_key)
+    track = prepare_track_for_indexing(db, s3_key)
+    track_id = int(track.id)
 
     if not FAST_REINDEX_MODE and track_already_processed(db, track_id):
         logger.info("Skipping already indexed track %s from %s", track_id, s3_key)
@@ -284,6 +293,7 @@ def process_s3_track(s3_key: str, db: Session, s3_bucket: str, s3_prefix: str = 
     result = _fingerprint_s3_track_worker(
         s3_key=s3_key,
         s3_bucket=s3_bucket,
+        track_id=track_id,
     )
 
     indexed = insert_fingerprint_result(db, result)
@@ -406,28 +416,29 @@ def _process_s3_bucket_parallel(s3_bucket: str, s3_prefix: str, keys: list[str])
     try:
         keys_to_process = []
 
-        if FAST_REINDEX_MODE:
-            keys_to_process = keys
-        else:
-            existing_track_ids = load_existing_track_ids(db)
+        for idx, key in enumerate(keys, start=1):
+            track = prepare_track_for_indexing(db, key)
+            track_id = int(track.id)
 
-            for idx, key in enumerate(keys, start=1):
-                track_id = extract_track_id_from_s3_key(key)
+            if not FAST_REINDEX_MODE and track_already_processed(db, track_id):
+                stats["skipped"] += 1
+                stats["processed_keys"] += 1
+            else:
+                keys_to_process.append(
+                    {
+                        "s3_key": key,
+                        "track_id": track_id,
+                    }
+                )
 
-                if track_id in existing_track_ids:
-                    stats["skipped"] += 1
-                    stats["processed_keys"] += 1
-                else:
-                    keys_to_process.append(key)
-
-                if idx % PROGRESS_EVERY == 0 or idx == len(keys):
-                    logger.info(
-                        "Precheck progress checked=%s/%s skipped_existing=%s to_process=%s",
-                        idx,
-                        len(keys),
-                        stats["skipped"],
-                        len(keys_to_process),
-                    )
+            if idx % PROGRESS_EVERY == 0 or idx == len(keys):
+                logger.info(
+                    "Precheck progress checked=%s/%s skipped_existing=%s to_process=%s",
+                    idx,
+                    len(keys),
+                    stats["skipped"],
+                    len(keys_to_process),
+                )
 
         logger.info(
             "Parallel indexing started workers=%s keys=%s skipped_existing=%s fast_reindex=%s",
@@ -439,8 +450,13 @@ def _process_s3_bucket_parallel(s3_bucket: str, s3_prefix: str, keys: list[str])
 
         with ProcessPoolExecutor(max_workers=INDEX_WORKERS) as executor:
             futures = {
-                executor.submit(_fingerprint_s3_track_worker, key, s3_bucket): key
-                for key in keys_to_process
+                executor.submit(
+                    _fingerprint_s3_track_worker,
+                    item["s3_key"],
+                    s3_bucket,
+                    item["track_id"],
+                ): item["s3_key"]
+                for item in keys_to_process
             }
 
             for future in as_completed(futures):
@@ -541,7 +557,7 @@ if __name__ == "__main__":
 
     Base.metadata.create_all(bind=engine)
 
-    bucket = os.getenv("S3_BUCKET", "tracks")
-    prefix = os.getenv("S3_PREFIX", "")
+    bucket = S3_BUCKET
+    prefix = S3_PREFIX
 
     process_s3_bucket(bucket, prefix)

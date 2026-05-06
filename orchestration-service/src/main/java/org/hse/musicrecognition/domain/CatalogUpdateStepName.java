@@ -1,0 +1,13 @@
+package org.hse.musicrecognition.domain;
+
+public enum CatalogUpdateStepName {
+    FINGERPRINT_INDEX,
+    ML_INCREMENTAL_SYNC,
+    ML_FULL_BUILD,
+    ML_RELOAD_RUNTIME,
+    RERANKER_REFERENCE_BUILD,
+    RERANKER_RELOAD_MODEL,
+    RERANKER_RELOAD_REFERENCE_STORE,
+    TRACK_IMPORT,
+    BULK_IMPORT
+}
