@@ -335,27 +335,34 @@ services:
     depends_on:
       fingerprint-service:
         condition: service_started
-      ml-service:
+      ml-reranker-service:
         condition: service_started
       orchestration-db:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://orchestration-db:5432/orchestration_db
       SPRING_DATASOURCE_USERNAME: orch_user
       SPRING_DATASOURCE_PASSWORD: orch_pass
+
       FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
-      FINGERPRINT_CONFIDENCE_THRESHOLD: 0.75
-      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      SPRING_KAFKA_CONSUMER_GROUP_ID: orchestration-service
-      ML_KAFKA_REQUEST_TOPIC: ml-recognition-requests
-      ML_KAFKA_RESPONSE_TOPIC: ml-recognition-responses
-      ML_TIMEOUT_MS: 15000
+      ML_RERANKER_SERVICE_URL: http://ml-reranker-service:8010
+
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio123
+
+      RECOGNITION_QUERY_AUDIO_BUCKET: recognition-queries
+      RECOGNITION_QUERY_AUDIO_PREFIX: debug
+      RECOGNITION_REFERENCE_AUDIO_BUCKET: full-tracks
+      RECOGNITION_FINGERPRINT_TOP_K: 20
+
       JWT_SECRET: supersecretkeysupersecretkeysupersecretkey123456
       JWT_EXPIRATION: 86400000
-      SPRING_KAFKA_PRODUCER_PROPERTIES_MAX_REQUEST_SIZE: 10485760 # 10 MB
-      SPRING_KAFKA_PRODUCER_PROPERTIES_BUFFER_MEMORY: 33554432
+
+      SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE: 20MB
+      SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: 20MB
     ports:
       - "8080:8080"
 

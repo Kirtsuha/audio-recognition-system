@@ -159,3 +159,15 @@ async def rerank(req: RerankRequest) -> RerankResponse:
     except Exception as exc:
         logger.exception("Rerank failed request_id=%s", req.request_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+from fastapi import Request
+
+@app.post("/debug-body")
+async def debug_body(request: Request):
+    body = await request.body()
+    return {
+        "content_type": request.headers.get("content-type"),
+        "content_length": request.headers.get("content-length"),
+        "body_len": len(body),
+        "body_preview": body[:500].decode("utf-8", errors="replace"),
+    }

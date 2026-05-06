@@ -19,7 +19,6 @@ dependencies {
 
     // === WEB (MVC) ===
     implementation("org.springframework.boot:spring-boot-starter-web")
-    implementation("org.springframework.kafka:spring-kafka")
 
     // === SECURITY ===
     implementation("org.springframework.boot:spring-boot-starter-security")
@@ -30,7 +29,7 @@ dependencies {
     // === DATABASE ===
     runtimeOnly("org.postgresql:postgresql")
 
-    // === SWAGGER (для MVC!) ===
+    // === SWAGGER (для MVC) ===
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.5.0")
 
     // === JWT ===
@@ -42,9 +41,11 @@ dependencies {
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")
 
+    // === MinIO ===
+    implementation("io.minio:minio:8.5.17")
+
     // === TESTS ===
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("org.springframework.kafka:spring-kafka-test")
 }
 
 tasks.test {

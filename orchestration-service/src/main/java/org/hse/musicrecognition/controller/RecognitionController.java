@@ -23,8 +23,10 @@ public class RecognitionController {
             summary = "Распознать аудиофайл",
             description = "Принимает аудиофайл и возвращает информацию о треке",
             responses = {
-                    @ApiResponse(responseCode = "200", description = "Распознано успешно"),
-                    @ApiResponse(responseCode = "401", description = "Пользователь не авторизован")
+                    @ApiResponse(responseCode = "200", description = "Запрос обработан"),
+                    @ApiResponse(responseCode = "400", description = "Некорректный файл"),
+                    @ApiResponse(responseCode = "401", description = "Пользователь не авторизован"),
+                    @ApiResponse(responseCode = "503", description = "Внешний сервис недоступен")
             }
     )
     public RecognitionResponse recognize(
@@ -32,12 +34,12 @@ public class RecognitionController {
             @RequestParam(value = "source", required = false, defaultValue = "upload") String source,
             Principal principal
     ) throws Exception {
-        byte[] bytes = file.getBytes();
-
         return recognitionService.recognize(
                 principal.getName(),
                 file.getOriginalFilename(),
-                bytes
+                file.getContentType(),
+                source,
+                file.getBytes()
         );
     }
 }

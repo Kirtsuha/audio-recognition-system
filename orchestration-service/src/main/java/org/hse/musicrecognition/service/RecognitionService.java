@@ -1,37 +1,83 @@
 package org.hse.musicrecognition.service;
 
 import lombok.RequiredArgsConstructor;
-import org.hse.musicrecognition.dto.FingerprintResponse;
-import org.hse.musicrecognition.dto.MlRecognitionResponse;
-import org.hse.musicrecognition.dto.RecognitionResponse;
-import org.hse.musicrecognition.dto.TrackMetadataResponse;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.extern.slf4j.Slf4j;
+import org.hse.musicrecognition.config.RecognitionProperties;
+import org.hse.musicrecognition.dto.*;
+import org.hse.musicrecognition.exception.BadRequestException;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
+import java.util.UUID;
+
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class RecognitionService {
 
     private final FingerprintClient fingerprintClient;
-    private final MlFallbackGateway mlFallbackGateway;
+    private final MlRerankerClient mlRerankerClient;
+    private final QueryAudioStorageService queryAudioStorageService;
     private final HistoryService historyService;
+    private final RecognitionProperties recognitionProperties;
 
-    @Value("${fingerprint.confidence-threshold}")
-    private double fingerprintConfidenceThreshold;
+    public RecognitionResponse recognize(
+            String username,
+            String filename,
+            String contentType,
+            String source,
+            byte[] audioBytes
+    ) {
+        if (audioBytes == null || audioBytes.length == 0) {
+            throw new BadRequestException("Audio file is empty");
+        }
 
-    @Value("${ml.confidence-threshold:0.70}")
-    private double mlConfidenceThreshold;
+        String requestId = UUID.randomUUID().toString().replace("-", "");
+        long startedAt = System.currentTimeMillis();
 
-    public RecognitionResponse recognize(String username, String filename, byte[] audioBytes) throws Exception {
-        FingerprintResponse fingerprintResponse = fingerprintClient.recognize(audioBytes);
+        StoredAudioRef storedAudio = queryAudioStorageService.save(
+                requestId,
+                filename,
+                contentType,
+                audioBytes
+        );
+
+        FingerprintCandidatesResponse fingerprint = fingerprintClient.retrieveCandidates(
+                audioBytes,
+                filename,
+                recognitionProperties.getFingerprint().getTopK()
+        );
 
         RecognitionResponse response;
 
-        if (shouldUseMlFallback(fingerprintResponse)) {
-            response = recognizeWithMlFallback(audioBytes, filename);
+        log.info(
+                "Calling ML reranker requestId={} queryAudio={}/{} referenceBucket={} fingerprintMatched={} candidates={}",
+                requestId,
+                storedAudio.bucket(),
+                storedAudio.key(),
+                recognitionProperties.getStorage().getReferenceAudioBucket(),
+                fingerprint == null ? null : fingerprint.matched(),
+                fingerprint == null || fingerprint.candidates() == null ? 0 : fingerprint.candidates().size()
+        );
+
+        if (fingerprint != null && fingerprint.isMatched()) {
+            response = buildFingerprintResponse(fingerprint);
         } else {
-            response = buildFingerprintResponse(fingerprintResponse);
+            response = recognizeWithReranker(requestId, storedAudio, fingerprint);
         }
+
+        long processingTimeMs = System.currentTimeMillis() - startedAt;
+
+        log.info(
+                "Recognition finished requestId={} username={} match={} trackId={} source={} confidence={} processingTimeMs={}",
+                requestId,
+                username,
+                response.isMatch(),
+                response.getTrackId(),
+                response.getSource(),
+                response.getConfidence(),
+                processingTimeMs
+        );
 
         historyService.save(
                 username,
@@ -46,72 +92,94 @@ public class RecognitionService {
         return response;
     }
 
-    private RecognitionResponse buildFingerprintResponse(FingerprintResponse fingerprintResponse) {
+    private RecognitionResponse buildFingerprintResponse(FingerprintCandidatesResponse fingerprint) {
+        FingerprintCandidateDto best = fingerprint.bestCandidate();
+
+        if (best == null) {
+            return new RecognitionResponse(
+                    false,
+                    null,
+                    null,
+                    null,
+                    fingerprint.confidence() == null ? 0.0 : fingerprint.confidence(),
+                    "fingerprint-not-found"
+            );
+        }
+
         return new RecognitionResponse(
-                fingerprintResponse.isMatch(),
-                fingerprintResponse.getTrackId().toString(),
-                fingerprintResponse.getTitle(),
-                fingerprintResponse.getArtist(),
-                fingerprintResponse.getConfidence(),
+                true,
+                best.trackId() == null ? null : String.valueOf(best.trackId()),
+                best.title(),
+                best.artist(),
+                best.confidence() == null
+                        ? fingerprint.confidence() == null ? 0.0 : fingerprint.confidence()
+                        : best.confidence(),
                 "fingerprint"
         );
     }
 
-    private RecognitionResponse recognizeWithMlFallback(byte[] audioBytes, String filename) throws Exception {
-        MlRecognitionResponse mlResponse = mlFallbackGateway.recognize(audioBytes, filename);
+    private RecognitionResponse recognizeWithReranker(
+            String requestId,
+            StoredAudioRef storedAudio,
+            FingerprintCandidatesResponse fingerprint
+    ) {
+        MlRerankRequest request = new MlRerankRequest(
+                requestId,
+                new QueryAudioRef(storedAudio.bucket(), storedAudio.key()),
+                recognitionProperties.getStorage().getReferenceAudioBucket(),
+                fingerprint,
+                Map.of()
+        );
 
-        double confidence = mlResponse.confidence() == null ? 0.0 : mlResponse.confidence();
+        log.info(
+                "Calling ML reranker requestId={} queryAudio={}/{} referenceBucket={} fingerprintMatched={} candidates={}",
+                requestId,
+                storedAudio.bucket(),
+                storedAudio.key(),
+                recognitionProperties.getStorage().getReferenceAudioBucket(),
+                fingerprint == null ? null : fingerprint.matched(),
+                fingerprint == null || fingerprint.candidates() == null ? 0 : fingerprint.candidates().size()
+        );
 
-        boolean mlMatched = Boolean.TRUE.equals(mlResponse.matched());
+        MlRerankResponse rerank = mlRerankerClient.rerank(request);
 
-        if (!mlMatched) {
+        if (rerank == null || !rerank.isMatched() || rerank.best() == null) {
+            double confidence = resolveRerankNotFoundConfidence(rerank, fingerprint);
+
             return new RecognitionResponse(
                     false,
-                    mlResponse.trackId() == null ? null : String.valueOf(mlResponse.trackId()),
+                    null,
                     null,
                     null,
                     confidence,
-                    "ml-fallback-not-found"
+                    "ml-reranker-not-found"
             );
         }
 
-        if (mlResponse.trackId() == null) {
-            return new RecognitionResponse(
-                    false,
-                    null,
-                    null,
-                    null,
-                    confidence,
-                    "ml-fallback-not-found"
-            );
-        }
-
-        if (confidence < mlConfidenceThreshold) {
-            return new RecognitionResponse(
-                    false,
-                    String.valueOf(mlResponse.trackId()),
-                    null,
-                    null,
-                    confidence,
-                    "ml-fallback-low-confidence"
-            );
-        }
-
-        TrackMetadataResponse metadata = fingerprintClient.getTrack(mlResponse.trackId());
+        RerankedCandidateDto best = rerank.best();
 
         return new RecognitionResponse(
                 true,
-                String.valueOf(metadata.trackId()),
-                metadata.title(),
-                metadata.artist(),
-                confidence,
-                "ml-fallback"
+                best.trackId() == null ? null : String.valueOf(best.trackId()),
+                best.title(),
+                best.artist(),
+                best.finalConfidence() == null ? 0.0 : best.finalConfidence(),
+                "ml-reranker"
         );
     }
 
-    private boolean shouldUseMlFallback(FingerprintResponse fingerprintResponse) {
-        return fingerprintResponse == null
-                || !fingerprintResponse.isMatch()
-                || fingerprintResponse.getConfidence() < fingerprintConfidenceThreshold;
+    private double resolveRerankNotFoundConfidence(
+            MlRerankResponse rerank,
+            FingerprintCandidatesResponse fingerprint
+    ) {
+        if (rerank != null && rerank.best() != null && rerank.best().finalConfidence() != null) {
+            return rerank.best().finalConfidence();
+        }
+
+        if (fingerprint != null && fingerprint.confidence() != null) {
+            return fingerprint.confidence();
+        }
+
+        return 0.0;
     }
 }

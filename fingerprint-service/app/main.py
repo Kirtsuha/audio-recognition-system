@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from fastapi import Query
 
-from config.config import INDEX_DURATION_SEC
+from config.config import INDEX_DURATION_SEC, MIN_ALIGNED_MATCHES, MIN_QUERY_COVERAGE, MIN_SCORE_GAP
 from fingerprint.matcher import match, retrieve_candidates
 from repository.db import get_db
 from repository.models import Track
@@ -124,6 +124,31 @@ def retrieve_candidates_file(file: UploadFile, db: Session, top_k: int = 50) -> 
         hashes = fingerprint_audio(path, INDEX_DURATION_SEC)
         result = retrieve_candidates(hashes, db, top_k=top_k)
 
+        candidates = result.get("candidates") or []
+
+        best_candidate = candidates[0] if candidates else None
+
+        matched = False
+        track_id = None
+        confidence = 0.0
+        reason = result.get("reason")
+
+        if best_candidate is not None:
+            track_id = best_candidate.get("track_id")
+            confidence = best_candidate.get("confidence", 0.0)
+
+            aligned_matches = int(best_candidate.get("aligned_matches") or 0)
+            query_hashes = int(result.get("query_hashes") or 0)
+            score_gap = float(best_candidate.get("score_gap") or 0.0)
+
+            matched = (
+                    aligned_matches >= MIN_ALIGNED_MATCHES
+                    and (aligned_matches / max(1, query_hashes)) >= MIN_QUERY_COVERAGE
+                    and score_gap >= MIN_SCORE_GAP
+            )
+
+            reason = None if matched else "low_confidence"
+
         track_ids = [
             int(candidate["track_id"])
             for candidate in result.get("candidates", [])
@@ -158,13 +183,17 @@ def retrieve_candidates_file(file: UploadFile, db: Session, top_k: int = 50) -> 
             enriched_candidates.append(item)
 
         return {
+            "match": matched,
+            "matched": matched,
+            "track_id": track_id,
+            "confidence": confidence,
+            "reason": reason,
             "source": "fingerprint",
             "top_k": top_k,
             "query_hashes": result.get("query_hashes", 0),
             "unique_query_hashes": result.get("unique_query_hashes", 0),
             "best_aligned_matches": result.get("best_aligned_matches", 0),
             "second_aligned_matches": result.get("second_aligned_matches", 0),
-            "reason": result.get("reason"),
             "candidates": enriched_candidates,
         }
 

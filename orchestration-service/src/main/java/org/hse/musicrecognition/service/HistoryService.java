@@ -3,10 +3,12 @@ package org.hse.musicrecognition.service;
 import lombok.RequiredArgsConstructor;
 import org.hse.musicrecognition.domain.RecognitionHistory;
 import org.hse.musicrecognition.domain.User;
+import org.hse.musicrecognition.exception.ForbiddenException;
 import org.hse.musicrecognition.exception.NotFoundException;
 import org.hse.musicrecognition.repository.HistoryRepository;
 import org.hse.musicrecognition.repository.UserRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -44,5 +46,33 @@ public class HistoryService {
 
     public List<RecognitionHistory> get(String username) {
         return repo.findByUserUsername(username);
+    }
+
+    @Transactional
+    public void deleteOne(String currentUsername, boolean isAdmin, Long historyId) {
+        RecognitionHistory item = repo.findById(historyId)
+                .orElseThrow(() -> new NotFoundException("History item not found: " + historyId));
+
+        String ownerUsername = item.getUser().getUsername();
+
+        if (!isAdmin && !ownerUsername.equals(currentUsername)) {
+            throw new ForbiddenException("You cannot delete another user's history item");
+        }
+
+        repo.delete(item);
+    }
+
+    @Transactional
+    public void deleteOwnHistory(String username) {
+        repo.deleteByUserUsername(username);
+    }
+
+    @Transactional
+    public void deleteUserHistoryByAdmin(Long userId) {
+        if (!userRepo.existsById(userId)) {
+            throw new NotFoundException("User not found: " + userId);
+        }
+
+        repo.deleteByUserId(userId);
     }
 }
