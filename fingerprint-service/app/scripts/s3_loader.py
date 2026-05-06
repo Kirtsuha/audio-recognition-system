@@ -38,11 +38,16 @@ def make_track_s3_key(artist: str, title: str, extension: str = ".mp3", prefix: 
     return f"{prefix}/{key}" if prefix else key
 
 
-def encode_metadata(title: str, artist: str) -> dict:
-    return {
+def encode_metadata(title: str, artist: str, album: str | None = None) -> dict:
+    metadata = {
         "title": quote(str(title), safe=""),
         "artist": quote(str(artist), safe=""),
     }
+
+    if album:
+        metadata["album"] = quote(str(album), safe="")
+
+    return metadata
 
 
 def decode_metadata(metadata: dict | None) -> tuple[str | None, str | None]:
@@ -191,6 +196,7 @@ def upload_single_track(
     filename: str,
     title: str,
     artist: str,
+    album: str | None = None,
     bucket: str | None = None,
     prefix: str = "",
     overwrite: bool = False,
@@ -226,7 +232,7 @@ def upload_single_track(
         fileobj,
         bucket_name,
         s3_key,
-        ExtraArgs={"Metadata": encode_metadata(title, artist)},
+        ExtraArgs={"Metadata": encode_metadata(title, artist, album)},
     )
 
     return {
@@ -236,6 +242,7 @@ def upload_single_track(
         "s3_key": s3_key,
         "title": title,
         "artist": artist,
+        "album": album,
     }
 
 

@@ -78,6 +78,7 @@ def upload_track_to_db(
     s3_key: str,
     title: str | None = None,
     artist: str | None = None,
+    album: str | None = None,
     duration_sec: float | None = None,
     fingerprint_count: int | None = None,
     commit: bool = True,
@@ -115,6 +116,8 @@ def upload_track_to_db(
     if existing:
         existing.title = str(title)
         existing.artist = str(artist)
+        if album is not None:
+            existing.album = album
         existing.s3_key = s3_key
         existing.duration_sec = (
             int(duration_sec) if duration_sec is not None else existing.duration_sec
@@ -132,6 +135,7 @@ def upload_track_to_db(
     track_kwargs = dict(
         title=str(title),
         artist=str(artist),
+        album=album,
         s3_key=s3_key,
         duration_sec=int(duration_sec) if duration_sec is not None else None,
         fingerprint_count=fingerprint_count,
@@ -222,6 +226,7 @@ def insert_fingerprint_result(db: Session, result: dict) -> dict:
         s3_key=result["s3_key"],
         title=result.get("title"),
         artist=result.get("artist"),
+        album=result.get("album"),
         duration_sec=result.get("duration_sec"),
         fingerprint_count=int(result.get("hash_count") or 0),
         commit=False,

@@ -9,6 +9,7 @@ class Track(Base):
     id = Column(Integer, primary_key=True)
     title = Column(Text, nullable=False)
     artist = Column(Text, nullable=False)
+    album = Column(Text, nullable=True)
     s3_key = Column(Text, nullable=False)
     duration_sec = Column(Integer, nullable=True)
     fingerprint_count = Column(Integer, nullable=True)

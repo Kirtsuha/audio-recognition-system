@@ -86,4 +86,43 @@ public class MlRerankerClient {
             );
         }
     }
+
+    public void reloadModel() {
+        postAdmin("/admin/reload-model");
+    }
+
+    public void reloadReferenceStore() {
+        postAdmin("/admin/reload-reference-store");
+    }
+
+    private void postAdmin(String path) {
+        try {
+            String url = mlRerankerUrl + path;
+
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .version(HttpClient.Version.HTTP_1_1)
+                    .header("Accept", "application/json")
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(
+                    httpRequest,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+            );
+
+            if (response.statusCode() >= 400) {
+                throw new ExternalServiceUnavailableException(
+                        "ML reranker rejected admin request: " + response.body()
+                );
+            }
+        } catch (ExternalServiceUnavailableException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new ExternalServiceUnavailableException(
+                    "ML reranker service is unavailable",
+                    e
+            );
+        }
+    }
 }

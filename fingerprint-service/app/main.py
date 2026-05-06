@@ -19,7 +19,7 @@ from repository.models import Track
 from scripts.fma_to_s3_loader import upload_hf_fma_to_s3
 from scripts.s3_loader import upload_single_track, upload_tracks_zip
 from service.audio2fingerprint import fingerprint_audio
-from service.postgres_loader_pipeline import process_s3_bucket
+from service.postgres_loader_pipeline import process_s3_bucket, upload_track_to_db
 from logging_utils import configure_logging
 from repository.init_db import Base
 from repository.database_config import engine
@@ -62,6 +62,9 @@ def init_db():
                     "track_s3_key_unique_idx ON track (s3_key)"
                 )
             )
+            connection.execute(
+                text("ALTER TABLE track ADD COLUMN IF NOT EXISTS album TEXT")
+            )
     except Exception:
         logger.warning("Failed to synchronize track schema helpers", exc_info=True)
 
@@ -76,6 +79,7 @@ def serialize_track(track: Track) -> dict:
         "track_id": track.id,
         "title": track.title,
         "artist": track.artist,
+        "album": track.album,
         "s3_key": track.s3_key,
     }
 
@@ -301,20 +305,40 @@ def upload_track_to_s3(
     file: UploadFile = File(...),
     title: str = Form(...),
     artist: str = Form(...),
+    album: str | None = Form(default=None),
     bucket: str | None = Form(default=None),
     prefix: str = Form(default=""),
     overwrite: bool = Form(default=False),
+    db: Session = Depends(get_db),
 ):
     try:
-        return upload_single_track(
+        summary = upload_single_track(
             fileobj=file.file,
             filename=file.filename or "track.mp3",
             title=title,
             artist=artist,
+            album=album,
             bucket=bucket,
             prefix=prefix,
             overwrite=overwrite,
         )
+
+        track = upload_track_to_db(
+            db=db,
+            track_id=None,
+            s3_key=summary["s3_key"],
+            title=title,
+            artist=artist,
+            album=album,
+            commit=True,
+        )
+
+        return {
+            **summary,
+            "track_id": int(track.id),
+            "trackId": int(track.id),
+            "status": "CREATED" if summary.get("uploaded") else "EXISTS",
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

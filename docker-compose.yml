@@ -337,6 +337,8 @@ services:
         condition: service_started
       ml-reranker-service:
         condition: service_started
+      ml-pipeline-runner:
+        condition: service_started
       orchestration-db:
         condition: service_healthy
       minio-init:
@@ -347,7 +349,11 @@ services:
       SPRING_DATASOURCE_PASSWORD: orch_pass
 
       FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      ML_SERVICE_URL: http://ml-pipeline-runner:8011
       ML_RERANKER_SERVICE_URL: http://ml-reranker-service:8010
+      CATALOG_S3_BUCKET: tracks
+      CATALOG_S3_PREFIX: ""
+      CATALOG_ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
 
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: minio
@@ -361,8 +367,9 @@ services:
       JWT_SECRET: supersecretkeysupersecretkeysupersecretkey123456
       JWT_EXPIRATION: 86400000
 
-      SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE: 20MB
-      SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: 20MB
+      SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE: 250MB
+      SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: 260MB
+      SERVER_TOMCAT_MAX_SWALLOW_SIZE: -1
     ports:
       - "8080:8080"
 
