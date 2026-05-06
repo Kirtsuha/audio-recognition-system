@@ -4,7 +4,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, BackgroundTasks, Form
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 import threading
 import uuid
@@ -16,7 +17,7 @@ from fingerprint.matcher import match, retrieve_candidates
 from repository.db import get_db
 from repository.models import Track
 from scripts.fma_to_s3_loader import upload_hf_fma_to_s3
-from scripts.s3_loader import upload_fma_zip
+from scripts.s3_loader import upload_single_track, upload_tracks_zip
 from service.audio2fingerprint import fingerprint_audio
 from service.postgres_loader_pipeline import process_s3_bucket
 from logging_utils import configure_logging
@@ -41,6 +42,28 @@ logger = logging.getLogger("fingerprint-service")
 @app.on_event("startup")
 def init_db():
     Base.metadata.create_all(engine)
+
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    SELECT setval(
+                        pg_get_serial_sequence('track', 'id'),
+                        COALESCE((SELECT MAX(id) FROM track), 0) + 1,
+                        false
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS "
+                    "track_s3_key_unique_idx ON track (s3_key)"
+                )
+            )
+    except Exception:
+        logger.warning("Failed to synchronize track schema helpers", exc_info=True)
 
 
 @app.get("/health")
@@ -224,10 +247,20 @@ def get_track(track_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/s3/upload-archive")
-def upload_archive_to_s3(file: UploadFile = File(...)):
+def upload_archive_to_s3(
+    file: UploadFile = File(...),
+    manifest: UploadFile = File(...),
+    bucket: str | None = Form(default=None),
+    prefix: str = Form(default=""),
+    max_files: int | None = Form(default=None),
+):
     suffix = Path(file.filename or "archive.zip").suffix.lower()
     if suffix != ".zip":
         raise HTTPException(status_code=400, detail="Only .zip archives are supported")
+
+    manifest_suffix = Path(manifest.filename or "manifest.csv").suffix.lower()
+    if manifest_suffix != ".csv":
+        raise HTTPException(status_code=400, detail="Only .csv manifests are supported")
 
     print("Received ZIP archive upload: %s", file.filename)
 
@@ -235,15 +268,55 @@ def upload_archive_to_s3(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, tmp)
         archive_path = tmp.name
 
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as tmp:
+        shutil.copyfileobj(manifest.file, tmp)
+        manifest_path = tmp.name
+
     try:
-        summary = upload_fma_zip(archive_path)
+        summary = upload_tracks_zip(
+            zip_path=archive_path,
+            manifest_path=manifest_path,
+            bucket=bucket,
+            prefix=prefix,
+            max_files=max_files,
+        )
         print("ZIP archive upload completed: %s", summary)
         return summary
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     finally:
         try:
             os.remove(archive_path)
         except OSError:
             print("Failed to remove temporary archive %s", archive_path)
+
+        try:
+            os.remove(manifest_path)
+        except OSError:
+            print("Failed to remove temporary manifest %s", manifest_path)
+
+
+@app.post("/s3/upload-track")
+def upload_track_to_s3(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    artist: str = Form(...),
+    bucket: str | None = Form(default=None),
+    prefix: str = Form(default=""),
+    overwrite: bool = Form(default=False),
+):
+    try:
+        return upload_single_track(
+            fileobj=file.file,
+            filename=file.filename or "track.mp3",
+            title=title,
+            artist=artist,
+            bucket=bucket,
+            prefix=prefix,
+            overwrite=overwrite,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/index/s3")

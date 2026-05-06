@@ -138,7 +138,7 @@ def train(bucket: str, prefix: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bucket", required=True, help="S3 bucket name")
-    parser.add_argument("--prefix", default="fma/", help="S3 prefix")
+    parser.add_argument("--prefix", default="", help="S3 prefix")
     args = parser.parse_args()
 
     train(bucket=args.bucket, prefix=args.prefix)

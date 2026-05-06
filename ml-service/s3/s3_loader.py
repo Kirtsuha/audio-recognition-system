@@ -1,6 +1,7 @@
 import os
 import tempfile
 import time
+from pathlib import Path
 
 from botocore.exceptions import BotoCoreError, ClientError, FlexibleChecksumError
 
@@ -9,9 +10,10 @@ from s3.s3_client import s3
 
 def download_song(bucket: str, key: str, retries: int = 3, retry_delay_sec: float = 1.0) -> str:
     last_exc = None
+    suffix = Path(key).suffix.lower() or ".audio"
 
     for attempt in range(1, retries + 1):
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
         tmp_path = tmp.name
         tmp.close()
 

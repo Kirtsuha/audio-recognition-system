@@ -109,7 +109,7 @@ services:
       S3_ACCESS_KEY: minio
       S3_SECRET_KEY: minio123
       S3_BUCKET: tracks
-      S3_PREFIX: fma/
+      S3_PREFIX: ""
       HF_TOKEN: ${HF_TOKEN}
       FP_INDEX_WORKERS: 4
       FP_FAST_REINDEX_MODE: "false"

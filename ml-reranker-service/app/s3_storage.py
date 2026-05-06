@@ -29,7 +29,14 @@ class S3Storage:
                 return body.read()
             finally:
                 body.close()
-        except (FlexibleChecksumError, BotoCoreError, ClientError, OSError) as exc:
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code")
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                raise FileNotFoundError(f"S3 object not found {bucket}/{key}") from exc
+
+            logger.exception("Failed to read S3 object bucket=%s key=%s", bucket, key)
+            raise RuntimeError(f"Failed to read S3 object {bucket}/{key}: {exc}") from exc
+        except (FlexibleChecksumError, BotoCoreError, OSError) as exc:
             logger.exception("Failed to read S3 object bucket=%s key=%s", bucket, key)
             raise RuntimeError(f"Failed to read S3 object {bucket}/{key}: {exc}") from exc
 

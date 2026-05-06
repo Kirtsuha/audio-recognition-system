@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     query_audio_bucket: str = "recognition-queries"
     reference_audio_bucket: str = "full-tracks"
+    reference_audio_fallback_buckets: str = "tracks,full-tracks"
 
     # Model
     model_path: str = "/app/models/model.pt"

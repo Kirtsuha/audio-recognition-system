@@ -177,6 +177,41 @@ class RerankerEngine:
         data = self.storage.get_bytes(bucket, key)
         return load_audio_from_bytes(data, sample_rate=settings.sr)
 
+    def _reference_buckets(self, primary_bucket: str) -> list[str]:
+        buckets = [primary_bucket]
+
+        for raw in settings.reference_audio_fallback_buckets.split(","):
+            bucket = raw.strip()
+            if bucket and bucket not in buckets:
+                buckets.append(bucket)
+
+        return buckets
+
+    def _load_reference_audio(self, buckets: list[str], key: str) -> np.ndarray:
+        last_exc: Exception | None = None
+
+        for bucket in buckets:
+            try:
+                return self._load_audio_from_s3(bucket, key)
+            except FileNotFoundError as exc:
+                last_exc = exc
+                logger.info(
+                    "Reference audio not found bucket=%s key=%s; trying next bucket if available",
+                    bucket,
+                    key,
+                )
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Reference audio lookup failed bucket=%s key=%s; trying next bucket if available",
+                    bucket,
+                    key,
+                )
+
+        raise RuntimeError(
+            f"Failed to load reference audio key={key} from buckets={buckets}"
+        ) from last_exc
+
     @torch.inference_mode()
     def _embed_batch(self, segments: list[np.ndarray]) -> np.ndarray:
         self.ensure_ready()
@@ -243,7 +278,7 @@ class RerankerEngine:
     def _score_candidates_slow_audio_fallback(
         self,
         *,
-        reference_bucket: str,
+        reference_buckets: list[str],
         candidates: list[FingerprintCandidate],
         candidate_indices: list[int],
         query_segment: np.ndarray,
@@ -264,7 +299,7 @@ class RerankerEngine:
             try:
                 ref_audio = ref_cache.get(candidate.s3_key)
                 if ref_audio is None:
-                    ref_audio = self._load_audio_from_s3(reference_bucket, candidate.s3_key)
+                    ref_audio = self._load_reference_audio(reference_buckets, candidate.s3_key)
                     ref_cache[candidate.s3_key] = ref_audio
 
                 base_offset_sec = self._candidate_offset_sec(candidate, hop_seconds)
@@ -326,6 +361,7 @@ class RerankerEngine:
         started_rerank = time.time()
 
         reference_bucket = reference_bucket or settings.reference_audio_bucket
+        reference_buckets = self._reference_buckets(reference_bucket)
         max_candidates = self._option_max_candidates(options)
         segment_seconds = self._option_segment_seconds(options)
         hop_seconds = self._option_hop_seconds(options)
@@ -384,7 +420,7 @@ class RerankerEngine:
 
         if fallback_indices and settings.ref_fallback_to_audio:
             fallback_scores = self._score_candidates_slow_audio_fallback(
-                reference_bucket=reference_bucket,
+                reference_buckets=reference_buckets,
                 candidates=candidates,
                 candidate_indices=fallback_indices,
                 query_segment=query_segment,

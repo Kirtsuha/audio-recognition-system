@@ -1,7 +1,22 @@
 from s3.s3_client import s3
 
 
-def list_all_songs(bucket: str, prefix: str = "fma/") -> list[str]:
+SUPPORTED_AUDIO_SUFFIXES = {
+    ".mp3",
+    ".wav",
+    ".flac",
+    ".ogg",
+    ".m4a",
+    ".aac",
+    ".webm",
+}
+
+
+def is_audio_key(key: str) -> bool:
+    return any(key.lower().endswith(suffix) for suffix in SUPPORTED_AUDIO_SUFFIXES)
+
+
+def list_all_songs(bucket: str, prefix: str = "") -> list[str]:
     keys: list[str] = []
     continuation_token = None
 
@@ -17,7 +32,7 @@ def list_all_songs(bucket: str, prefix: str = "fma/") -> list[str]:
 
         for obj in response.get("Contents", []):
             key = obj["Key"]
-            if key.endswith(".mp3") or key.endswith(".wav"):
+            if is_audio_key(key):
                 keys.append(key)
 
         if response.get("IsTruncated"):

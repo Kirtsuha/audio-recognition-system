@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Text, ForeignKey, BigInteger, PrimaryKeyConstraint, UniqueConstraint
+from sqlalchemy import Column, Integer, Text, ForeignKey, BigInteger, UniqueConstraint
 
 from repository.database_config import Base
 from sqlalchemy import Index
@@ -12,6 +12,10 @@ class Track(Base):
     s3_key = Column(Text, nullable=False)
     duration_sec = Column(Integer, nullable=True)
     fingerprint_count = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("s3_key", name="track_s3_key_unique_idx"),
+    )
 
 class Fingerprint(Base):
     __tablename__ = "fingerprint"
