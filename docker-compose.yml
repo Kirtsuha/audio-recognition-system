@@ -58,43 +58,6 @@ services:
       mc mb --ignore-existing local/recognition-queries
       "
 
-  kafka:
-    image: apache/kafka:3.7.2
-    container_name: kafka
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-
-      KAFKA_MESSAGE_MAX_BYTES: 10485760
-      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
-      KAFKA_SOCKET_REQUEST_MAX_BYTES: 104857600
-
-      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-      ALLOW_PLAINTEXT_LISTENER: "yes"
-
-    volumes:
-      - kafka_data:/var/lib/kafka/data
-
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/9092'"]
-      interval: 10s
-      timeout: 10s
-      retries: 10
-
   fingerprint-service:
     build:
       context: ./fingerprint-service
@@ -108,7 +71,7 @@ services:
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: minio
       S3_SECRET_KEY: minio123
-      S3_BUCKET: tracks
+      S3_BUCKET: full-tracks
       S3_PREFIX: ""
       HF_TOKEN: ${HF_TOKEN}
       FP_INDEX_WORKERS: 4
@@ -132,8 +95,6 @@ services:
     depends_on:
       fingerprint-service:
         condition: service_started
-      kafka:
-        condition: service_healthy
       minio-init:
         condition: service_completed_successfully
     environment:
@@ -143,10 +104,6 @@ services:
       S3_BUCKET: full-tracks
       S3_PREFIX: ""
       TRACKS_DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
-      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      ML_REQUEST_TOPIC: ml-recognition-requests
-      ML_RESPONSE_TOPIC: ml-recognition-responses
-      KAFKA_CONSUMER_GROUP: ml-service
       ARTIFACTS_DIR: /app/artifacts
       ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
       RUNS_DIR: /app/artifacts/runs
@@ -173,8 +130,6 @@ services:
       FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
       COMBINED_RESULTS_PATH: /app/artifacts/eval/combined_eval_results.jsonl
       COMBINED_METRICS_PATH: /app/artifacts/eval/combined_eval_metrics.json
-      KAFKA_MAX_PARTITION_FETCH_BYTES: 10485760
-      KAFKA_FETCH_MAX_BYTES: 10485760
     ports:
       - "8010:8010"
     volumes:
@@ -315,8 +270,6 @@ services:
       ML_RERANKER_FP_WEIGHT: 0.95
       ML_RERANKER_ML_WEIGHT: 0.05
       ML_RERANKER_NO_MATCH_THRESHOLD: 0.45
-      ML_RERANKER_DEBUG_UPLOAD_ENABLED: "true"
-
       ML_RERANKER_REF_EMBEDDINGS_PATH: /app/models/active/reranker_ref_embeddings.npy
       ML_RERANKER_REF_META_PATH: /app/models/active/reranker_ref_meta.jsonl
       ML_RERANKER_REF_CONFIG_PATH: /app/models/active/reranker_ref_config.json
@@ -351,7 +304,7 @@ services:
       FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
       ML_SERVICE_URL: http://ml-pipeline-runner:8011
       ML_RERANKER_SERVICE_URL: http://ml-reranker-service:8010
-      CATALOG_S3_BUCKET: tracks
+      CATALOG_S3_BUCKET: full-tracks
       CATALOG_S3_PREFIX: ""
       CATALOG_ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
 
@@ -377,7 +330,6 @@ volumes:
   fingerprint_postgres_data:
   orchestration_postgres_data:
   minio_data:
-  kafka_data:
   ml_artifacts:
   ml_prepared_data:
   eval_artifacts:

@@ -137,7 +137,7 @@ def call_ml_reranker(
         "options": {
             "max_candidates": max_candidates,
             "segment_seconds": segment_seconds,
-            # Если fingerprint уже отдает best_offset_sec, это поле не используется.
+
             "fingerprint_offset_hop_seconds": 1.0,
             "offset_jitter_seconds": [0.0],
             "fp_weight": fp_weight,
@@ -385,7 +385,7 @@ def evaluate_reranker(
         test_limit=test_limit,
     )
 
-    # Prefer val split for comparable fixed validation.
+
     val_items = [x for x in items if x.get("split") == "val"]
     if not val_items:
         val_items = items

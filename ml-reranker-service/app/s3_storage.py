@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import logging
 
 import boto3
@@ -39,26 +38,6 @@ class S3Storage:
         except (FlexibleChecksumError, BotoCoreError, OSError) as exc:
             logger.exception("Failed to read S3 object bucket=%s key=%s", bucket, key)
             raise RuntimeError(f"Failed to read S3 object {bucket}/{key}: {exc}") from exc
-
-    def put_bytes(
-        self,
-        bucket: str,
-        key: str,
-        data: bytes,
-        content_type: str = "application/octet-stream",
-    ) -> None:
-        self.ensure_bucket(bucket)
-        try:
-            self.client.put_object(
-                Bucket=bucket,
-                Key=key,
-                Body=io.BytesIO(data),
-                ContentLength=len(data),
-                ContentType=content_type,
-            )
-        except (BotoCoreError, ClientError, OSError) as exc:
-            logger.exception("Failed to write S3 object bucket=%s key=%s", bucket, key)
-            raise RuntimeError(f"Failed to write S3 object {bucket}/{key}: {exc}") from exc
 
     def ensure_bucket(self, bucket: str) -> None:
         try:

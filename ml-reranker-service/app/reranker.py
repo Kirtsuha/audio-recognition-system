@@ -387,7 +387,7 @@ class RerankerEngine:
         target_len = int(round(segment_seconds * settings.sr))
         query_segment = pad_or_trim(query_audio, target_len=target_len)
 
-        # Fast path: query is embedded once.
+
         query_embedding = self._embed_batch([query_segment])[0]
 
         best_by_candidate: dict[int, tuple[float, float]] = {}

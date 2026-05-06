@@ -48,10 +48,8 @@ def extract_reference_windows(
     window_seconds: float,
     hop_seconds: float,
 ) -> list[tuple[np.ndarray, float]]:
-    """
-    Returns:
-        [(window_audio, start_sec), ...]
-    """
+
+
     window_len = int(round(window_seconds * SR))
     hop_len = int(round(hop_seconds * SR))
 

@@ -12,12 +12,12 @@ import soundfile as sf
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from config.config import INDEX_DURATION_SEC
+from config.config import INDEX_DURATION_SEC, S3_PREFIX
 from repository.database_config import Base, engine
 from repository.db import get_db
 from repository.models import Fingerprint, Track
 from repository.s3_client import get_s3
-from scripts.s3_loader import decode_metadata
+from scripts.s3_loader import decode_metadata, S3_BUCKET
 from service.audio2fingerprint import fingerprint_audio
 
 logger = logging.getLogger("fingerprint.indexer")
@@ -162,14 +162,8 @@ def _fingerprint_s3_track_worker(
     s3_bucket: str,
     track_id: int,
 ) -> dict:
-    """
-    Worker process:
-    - creates its own S3 client
-    - downloads track
-    - calculates duration
-    - calculates fingerprint hashes
-    - returns pure dict, no DB objects
-    """
+
+
     worker_s3 = get_s3()
 
     timings = {}
@@ -213,11 +207,8 @@ def _fingerprint_s3_track_worker(
 
 
 def insert_fingerprint_result(db: Session, result: dict) -> dict:
-    """
-    Main process only:
-    - writes Track
-    - writes Fingerprint rows
-    """
+
+
     t0 = time.perf_counter()
 
     track = upload_track_to_db(
@@ -284,9 +275,8 @@ def prepare_track_for_indexing(db: Session, s3_key: str) -> Track:
 
 
 def process_s3_track(s3_key: str, db: Session, s3_bucket: str, s3_prefix: str = "") -> dict:
-    """
-    Sequential mode. Useful for debugging and INDEX_WORKERS=1.
-    """
+
+
     if not is_audio_file(s3_key):
         logger.info("Skipping non-audio object: %s", s3_key)
         return {"status": "ignored", "s3_key": s3_key}
@@ -567,7 +557,7 @@ if __name__ == "__main__":
 
     Base.metadata.create_all(bind=engine)
 
-    bucket = os.getenv("S3_BUCKET", "tracks")
-    prefix = os.getenv("S3_PREFIX", "")
+    bucket = S3_BUCKET
+    prefix = S3_PREFIX
 
     process_s3_bucket(bucket, prefix)

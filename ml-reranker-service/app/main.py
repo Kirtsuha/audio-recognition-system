@@ -1,19 +1,13 @@
 from __future__ import annotations
 
 import logging
-import time
-from pathlib import Path
-from uuid import uuid4
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException
 
 from app.config import settings
 from app.reranker import RerankerEngine
 from app.s3_storage import S3Storage
 from app.schemas import (
-    DebugFetchAudioRequest,
-    DebugFetchAudioResponse,
-    DebugUploadAudioResponse,
     HealthResponse,
     ReadyResponse,
     RerankRequest,
@@ -77,56 +71,6 @@ async def reload_model() -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.post("/debug/fetch-audio", response_model=DebugFetchAudioResponse)
-async def debug_fetch_audio(req: DebugFetchAudioRequest) -> DebugFetchAudioResponse:
-    try:
-        result = engine.debug_fetch_audio(bucket=req.audio.bucket, key=req.audio.key)
-        return DebugFetchAudioResponse(**result)
-    except Exception as exc:
-        logger.exception("Debug fetch audio failed bucket=%s key=%s", req.audio.bucket, req.audio.key)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.post("/debug/upload-audio", response_model=DebugUploadAudioResponse)
-async def debug_upload_audio(file: UploadFile = File(...)) -> DebugUploadAudioResponse:
-    if not settings.debug_upload_enabled:
-        raise HTTPException(status_code=403, detail="Debug upload is disabled")
-
-    started = time.time()
-    data = await file.read()
-
-    if not data:
-        raise HTTPException(status_code=400, detail="Empty file")
-
-    suffix = Path(file.filename or "input.wav").suffix.lower() or ".wav"
-    key = f"debug/{uuid4().hex}/input{suffix}"
-
-    try:
-        storage.put_bytes(
-            bucket=settings.query_audio_bucket,
-            key=key,
-            data=data,
-            content_type=file.content_type or "application/octet-stream",
-        )
-    except Exception as exc:
-        logger.exception("Debug upload failed key=%s", key)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    logger.info(
-        "Debug audio uploaded bucket=%s key=%s bytes=%s elapsed_ms=%s",
-        settings.query_audio_bucket,
-        key,
-        len(data),
-        int((time.time() - started) * 1000),
-    )
-
-    return DebugUploadAudioResponse(
-        bucket=settings.query_audio_bucket,
-        key=key,
-        bytes=len(data),
-    )
-
-
 @app.post("/admin/reload-reference-store")
 async def reload_reference_store() -> dict:
     try:
@@ -159,15 +103,3 @@ async def rerank(req: RerankRequest) -> RerankResponse:
     except Exception as exc:
         logger.exception("Rerank failed request_id=%s", req.request_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-from fastapi import Request
-
-@app.post("/debug-body")
-async def debug_body(request: Request):
-    body = await request.body()
-    return {
-        "content_type": request.headers.get("content-type"),
-        "content_length": request.headers.get("content-length"),
-        "body_len": len(body),
-        "body_preview": body[:500].decode("utf-8", errors="replace"),
-    }

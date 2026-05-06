@@ -5,11 +5,11 @@ import zipfile
 from pathlib import PurePosixPath
 from urllib.parse import quote, unquote
 
+from config.config import S3_BUCKET
 from repository.s3_client import ensure_bucket_exists, get_s3, object_exists
 
 
 MAX_FILES = int(os.getenv("S3_LOADER_MAX_FILES", "5000"))
-S3_BUCKET = os.getenv("S3_BUCKET", "tracks")
 AUDIO_EXT = (".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac")
 
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
@@ -244,10 +244,6 @@ def upload_single_track(
         "artist": artist,
         "album": album,
     }
-
-
-def upload_fma_zip(zip_path: str, max_files: int | None = None) -> dict:
-    raise ValueError("upload_fma_zip is deprecated; use upload_tracks_zip with manifest.csv")
 
 
 if __name__ == "__main__":

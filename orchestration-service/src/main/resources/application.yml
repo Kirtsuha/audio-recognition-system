@@ -14,19 +14,6 @@ spring:
       ddl-auto: update
     show-sql: true
 
-  kafka:
-    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
-    consumer:
-      group-id: ${SPRING_KAFKA_CONSUMER_GROUP_ID:orchestration-service}
-      auto-offset-reset: earliest
-      properties:
-        spring.json.trusted.packages: "org.hse.musicrecognition.dto"
-    producer:
-      properties:
-        spring.json.add.type.headers: false
-    listener:
-      missing-topics-fatal: false
-
 fingerprint:
   service:
     url: ${FINGERPRINT_SERVICE_URL:http://fingerprint-service:8000}

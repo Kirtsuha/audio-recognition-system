@@ -7,6 +7,5 @@ numpy
 fastapi
 uvicorn
 python-multipart
-kafka-python
 soundfile
 psycopg[binary]

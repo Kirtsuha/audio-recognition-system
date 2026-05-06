@@ -28,7 +28,7 @@ class ExperimentRunRequest(BaseModel):
     index_all_prepared: bool = False
 
     fixed_eval_set_name: str = Field(default="default", min_length=1, max_length=100)
-    eval_noise_mode: str = Field(default="both")  # clean | noisy | phone_noisy | both | all
+    eval_noise_mode: str = Field(default="both")
 
     select_best_checkpoint: bool = False
     best_checkpoint_metric: str = "recall_at_1"
@@ -55,7 +55,7 @@ class FullRunRequest(BaseModel):
 
     eval_query_limit: int = Field(default=500, ge=0)
     fixed_eval_set_name: str = Field(default="prod_val500_v1", min_length=1, max_length=100)
-    eval_noise_mode: str = Field(default="noisy")  # clean | noisy | both
+    eval_noise_mode: str = Field(default="noisy")
     aggregation_strategies: list[str] = Field(
         default_factory=lambda: ["max", "support", "hybrid_v2", "current"]
     )
@@ -161,7 +161,7 @@ class BuildFaissOnlyRequest(BaseModel):
     index_filename: str = "faiss.index"
     meta_filename: str = "faiss_meta.json"
 
-    index_type: str | None = None  # flat | ivf_flat | None => from config
+    index_type: str | None = None
     nlist: int | None = Field(default=None, ge=1)
     nprobe: int | None = Field(default=None, ge=1)
 
@@ -183,7 +183,7 @@ class EvaluateArtifactsRequest(BaseModel):
     use_full_query_audio: bool = False
 
     fixed_eval_set_name: str = "prod_val500_v1"
-    eval_noise_mode: str = "noisy"  # clean | noisy | phone_noisy | both | all
+    eval_noise_mode: str = "noisy"
 
     aggregation_strategies: list[str] = Field(
         default_factory=lambda: ["max"]

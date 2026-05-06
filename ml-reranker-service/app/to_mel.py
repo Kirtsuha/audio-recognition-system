@@ -52,13 +52,8 @@ def to_mel_batch(
     device: torch.device | str | None = None,
     normalize: bool = True,
 ) -> torch.Tensor:
-    """
-    Input:
-        audio_batch: [B, samples] or [samples]
 
-    Output:
-        [B, 1, n_mels, frames]
-    """
+
     if device is None:
         if isinstance(audio_batch, torch.Tensor):
             device = audio_batch.device

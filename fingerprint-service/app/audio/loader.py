@@ -14,12 +14,12 @@ def load_audio(path, sr=SAMPLE_RATE, duration=None):
             duration=duration,
         )
 
-        # Проверка 1: пустой файл
+
         if y is None or len(y) == 0:
             print("Empty audio: %s", path)
             return None, None
 
-        # Проверка 3: NaN / Inf
+
         if not np.isfinite(y).all():
             print("Invalid values in audio: %s", path)
             return None, None

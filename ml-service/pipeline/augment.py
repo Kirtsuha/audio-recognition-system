@@ -61,12 +61,8 @@ def normalize_peak(audio: np.ndarray, peak: float = 0.98) -> np.ndarray:
 
 
 def augment_audio(audio: np.ndarray, fast_mode: bool = FAST_AUGMENT) -> np.ndarray:
-    """
-    fast_mode=True:
-        cheap augmentations only (noise/gain/clipping/reverb)
-    fast_mode=False:
-        full augmentations including pitch/time
-    """
+
+
     out = audio.astype(np.float32).copy()
 
     if random.random() < 0.75:
@@ -94,23 +90,23 @@ def augment_audio(audio: np.ndarray, fast_mode: bool = FAST_AUGMENT) -> np.ndarr
 def augment_audio_strong_noisy(audio: np.ndarray) -> np.ndarray:
     out = audio.astype(np.float32).copy()
 
-    # почти всегда меняем громкость
+
     if random.random() < 0.95:
         out = random_gain(out, min_db=-14.0, max_db=10.0)
 
-    # почти всегда добавляем шум, иногда очень сильный
+
     if random.random() < 0.95:
         out = add_gaussian_noise(out, snr_db_min=-2.0, snr_db_max=18.0)
 
-    # чаще клиппинг
+
     if random.random() < 0.45:
         out = random_clipping(out, min_clip=0.45, max_clip=0.90)
 
-    # чаще реверберация
+
     if random.random() < 0.45:
         out = simple_reverb(out)
 
-    # иногда вторичный шум после искажений
+
     if random.random() < 0.25:
         out = add_gaussian_noise(out, snr_db_min=5.0, snr_db_max=20.0)
 
@@ -257,20 +253,16 @@ def random_room_reverb(audio: np.ndarray) -> np.ndarray:
     return reverbed.astype(np.float32)
 
 def random_soft_saturation(audio: np.ndarray) -> np.ndarray:
-    """
-    Мягкая нелинейность вместо жёсткого clipping.
-    Похоже на перегруз микрофона/динамика, но не режет сигнал так агрессивно.
-    """
+
+
     drive = random.uniform(1.1, 2.5)
     out = np.tanh(audio.astype(np.float32) * drive) / np.tanh(drive)
     return out.astype(np.float32)
 
 
 def random_phone_filter_mild(audio: np.ndarray) -> np.ndarray:
-    """
-    Мягкая телефонная АЧХ.
-    Не режем всё до 3.2 kHz слишком часто — музыка теряет много идентичности.
-    """
+
+
     low = random.uniform(60.0, 180.0)
     high = random.uniform(5500.0, 7800.0)
 
@@ -286,9 +278,8 @@ def random_phone_filter_mild(audio: np.ndarray) -> np.ndarray:
 
 
 def random_phone_filter_medium(audio: np.ndarray) -> np.ndarray:
-    """
-    Более заметная телефонная АЧХ, но всё ещё не экстремальная.
-    """
+
+
     low = random.uniform(90.0, 260.0)
     high = random.uniform(4200.0, 7200.0)
 
@@ -304,10 +295,8 @@ def random_phone_filter_medium(audio: np.ndarray) -> np.ndarray:
 
 
 def random_room_reverb_mild(audio: np.ndarray) -> np.ndarray:
-    """
-    Мягкая комнатная реверберация.
-    Старый random_room_reverb мог давать слишком сильный хвост.
-    """
+
+
     delay_ms_1 = random.uniform(12.0, 35.0)
     delay_ms_2 = random.uniform(40.0, 90.0)
 
@@ -326,10 +315,8 @@ def random_room_reverb_mild(audio: np.ndarray) -> np.ndarray:
 
 
 def random_codec_degrade_mild(audio: np.ndarray) -> np.ndarray:
-    """
-    Мягкая имитация codec/resampling.
-    Не опускаемся до 6 kHz в основном сценарии.
-    """
+
+
     target_sr = random.choice([11025, 12000, 14000])
 
     try:
@@ -347,14 +334,8 @@ def random_codec_degrade_mild(audio: np.ndarray) -> np.ndarray:
 
 
 def augment_audio_phone_mild(audio: np.ndarray) -> np.ndarray:
-    """
-    Основная phone augmentation для обучения.
 
-    Цель:
-      - похоже на телефон/микрофон/комнату;
-      - не разрушает музыкальную идентичность;
-      - подходит для InfoNCE positive pairs.
-    """
+
     out = audio.astype(np.float32).copy()
 
     if random.random() < 0.70:
@@ -383,17 +364,14 @@ def augment_audio_phone_mild(audio: np.ndarray) -> np.ndarray:
     if random.random() < 0.10:
         out = random_codec_degrade_mild(out)
 
-    # dropout в mild-режиме лучше не использовать:
-    # он создаёт локальные провалы, которые плохо подходят для positive pair.
+
     out = normalize_peak(out, peak=random.uniform(0.88, 0.98))
     return out.astype(np.float32)
 
 
 def augment_audio_phone_medium(audio: np.ndarray) -> np.ndarray:
-    """
-    Более грязный телефонный сценарий.
-    Использовать умеренно.
-    """
+
+
     out = audio.astype(np.float32).copy()
 
     if random.random() < 0.85:
@@ -430,10 +408,8 @@ def augment_audio_phone_medium(audio: np.ndarray) -> np.ndarray:
 
 
 def augment_audio_phone_hard(audio: np.ndarray) -> np.ndarray:
-    """
-    Редкий стресс-тест.
-    Не использовать как основной positive pair.
-    """
+
+
     out = audio.astype(np.float32).copy()
 
     if random.random() < 0.90:
@@ -473,12 +449,8 @@ def augment_audio_phone_hard(audio: np.ndarray) -> np.ndarray:
 
 
 def augment_audio_phone_noisy(audio: np.ndarray) -> np.ndarray:
-    """
-    Public phone-noisy augmentation.
 
-    Для eval лучше использовать mix, а не всегда hard.
-    Иначе eval становится нереалистично разрушительным.
-    """
+
     r = random.random()
 
     if r < 0.65:

@@ -12,7 +12,7 @@ import shutil
 import torch.nn.functional as F
 
 from app.model import AudioEncoder
-from pipeline.augment import augment_audio, augment_audio_strong_noisy, augment_audio_phone_noisy, \
+from pipeline.augment import augment_audio, augment_audio_strong_noisy, augment_audio_phone_noisy,\
     augment_audio_phone_mild, augment_audio_phone_medium, augment_audio_phone_hard
 from pipeline.config import (
     BATCH_SIZE,
@@ -264,11 +264,7 @@ def train_prepared(
             a_mel = to_mel_batch(a, device=device, normalize=True)
             p_mel = to_mel_batch(p, device=device, normalize=True)
 
-            # with torch.autocast(
-            #         device_type="cuda",
-            #         dtype=torch.float16,
-            #         enabled=device.type == "cuda",
-            # ):
+
             emb_a = model(a_mel)
             emb_p = model(p_mel)
 

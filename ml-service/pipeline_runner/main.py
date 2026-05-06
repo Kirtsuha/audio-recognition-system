@@ -370,7 +370,7 @@ def run_experiment_pipeline(payload: ExperimentRunRequest) -> None:
                     meta_out_path=index_meta_path,
                 )
 
-        # Для experiment-run не промоутим в active автоматически
+
         update_status(
             phase="done",
             finished_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

@@ -30,9 +30,8 @@ def validate_audio_key(key: str) -> None:
 
 
 def load_audio_from_bytes(data: bytes, sample_rate: int | None = None) -> np.ndarray:
-    """
-    Decode audio bytes to mono float32 waveform.
-    """
+
+
     target_sr = sample_rate or settings.sr
     bio = io.BytesIO(data)
 

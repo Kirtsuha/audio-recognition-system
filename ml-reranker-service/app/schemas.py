@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 class MinioAudioRef(BaseModel):
@@ -28,10 +26,10 @@ class FingerprintCandidate(BaseModel):
     artist: str | None = None
     s3_key: str
 
-    # Preferred. Add this in fingerprint-service if possible.
+
     best_offset_sec: float | None = None
 
-    # Allows extra fields from fingerprint without breaking ML service.
+
     model_config = {
         "extra": "allow",
     }
@@ -123,24 +121,3 @@ class ReadyResponse(BaseModel):
     reference_store_tracks: int = 0
 
 
-class DebugFetchAudioRequest(BaseModel):
-    audio: MinioAudioRef
-
-
-class DebugFetchAudioResponse(BaseModel):
-    bucket: str
-    key: str
-    bytes: int
-    duration_sec: float
-    sample_rate: int
-
-
-class DebugUploadAudioResponse(BaseModel):
-    bucket: str
-    key: str
-    bytes: int
-
-
-class ErrorResponse(BaseModel):
-    detail: str
-    extra: dict[str, Any] = Field(default_factory=dict)
