@@ -36,6 +36,7 @@ active/
 *.flac
 *.npy
 *.npz
-*.pkl
-*.sqlite
-*.db
+*.pt
+*.pth
+*.index
+*.jsonl

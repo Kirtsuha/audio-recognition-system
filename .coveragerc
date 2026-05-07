@@ -1,14 +1,32 @@
 [run]
+data_file = .coverage.ml-service-data
+source =
+    ml-service/app
+    ml-service/pipeline
+    ml-service/evaluation
+    ml-service/pipeline_runner
 omit =
+    */app/model.py
+    */app/recognition.py
     */pipeline/train.py
     */pipeline/train_prepared.py
     */pipeline/embed.py
+    */pipeline/augment.py
     */pipeline/build_embeddings_from_prepared.py
+    */pipeline/build_reranker_referece_embeddings.py
+    */pipeline/cleanup.py
     */pipeline/prepare_data.py
     */pipeline/incremental_sync.py
+    */pipeline/retrain_status.py
+    */pipeline/run_metadata.py
+    */pipeline/to_mel.py
     */evaluation/eval_dataset.py
     */evaluation/eval_runner.py
+    */evaluation/evaluate_artifacts.py
     */evaluation/evaluate_prepared.py
+    */evaluation/reranker_evaluation.py
+    */evaluation/select_best_checkpoint.py
+    */pipeline_runner/main.py
 
 [report]
 exclude_lines =

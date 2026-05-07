@@ -1,0 +1,13 @@
+[run]
+data_file = .coverage.reranker-unit
+source =
+    ml-reranker-service/app
+omit =
+    */model.py
+    */to_mel.py
+    */s3_storage.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
