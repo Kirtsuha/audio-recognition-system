@@ -326,6 +326,15 @@ services:
     ports:
       - "8080:8080"
 
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      orchestration-service:
+        condition: service_started
+    ports:
+      - "3000:80"
+
 volumes:
   fingerprint_postgres_data:
   orchestration_postgres_data:

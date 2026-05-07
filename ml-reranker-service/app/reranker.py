@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from app.audio import crop_segment, load_audio_from_bytes, pad_or_trim, validate_audio_key
+from app.audio import AudioDecodeError, crop_segment, load_audio_from_bytes, pad_or_trim, validate_audio_key
 from app.config import settings
 from app.model import AudioEncoder
 from app.reference_store import ReferenceEmbeddingStore
@@ -175,7 +175,11 @@ class RerankerEngine:
     def _load_audio_from_s3(self, bucket: str, key: str) -> np.ndarray:
         validate_audio_key(key)
         data = self.storage.get_bytes(bucket, key)
-        return load_audio_from_bytes(data, sample_rate=settings.sr)
+        return load_audio_from_bytes(
+            data,
+            sample_rate=settings.sr,
+            suffix=Path(key).suffix.lower(),
+        )
 
     def _reference_buckets(self, primary_bucket: str) -> list[str]:
         buckets = [primary_bucket]
@@ -355,7 +359,28 @@ class RerankerEngine:
         started_total = time.time()
         started_query = time.time()
 
-        query_audio = self._load_audio_from_s3(query_bucket, query_key)
+        try:
+            query_audio = self._load_audio_from_s3(query_bucket, query_key)
+        except AudioDecodeError:
+            logger.warning(
+                "Failed to decode query audio request_id=%s bucket=%s key=%s",
+                request_id,
+                query_bucket,
+                query_key,
+                exc_info=True,
+            )
+            return RerankResponse(
+                request_id=request_id,
+                matched=False,
+                reason="query_audio_decode_failed",
+                best=None,
+                candidates=[],
+                timing_ms={
+                    "total": int((time.time() - started_total) * 1000),
+                    "download_query": int((time.time() - started_query) * 1000),
+                    "rerank": 0,
+                },
+            )
 
         timing_download_query = int((time.time() - started_query) * 1000)
         started_rerank = time.time()

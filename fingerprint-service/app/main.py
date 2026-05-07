@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query, BackgroundTasks, Form
 from fastapi.responses import StreamingResponse
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.orm import Session
 
 from config.config import INDEX_DURATION_SEC, MIN_ALIGNED_MATCHES, MIN_QUERY_COVERAGE, MIN_SCORE_GAP
@@ -230,32 +230,57 @@ def retrieve_candidates_api(
         top_k=top_k,
     )
 
+@app.get("/tracks/search")
+def search_tracks(
+    query: str | None = Query(default=None),
+    title: str | None = Query(default=None),
+    artist: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    search_text = (query or title or "").strip()
+    artist_text = (artist or "").strip()
+
+    if not search_text and not artist_text:
+        raise HTTPException(status_code=400, detail="query, title or artist is required")
+
+    db_query = db.query(Track)
+
+    if search_text:
+        pattern = f"%{search_text}%"
+        db_query = db_query.filter(
+            or_(
+                Track.title.ilike(pattern),
+                Track.artist.ilike(pattern),
+            )
+        )
+
+    if artist_text:
+        db_query = db_query.filter(Track.artist.ilike(f"%{artist_text}%"))
+
+    tracks = db_query.order_by(Track.id.asc()).limit(limit).all()
+
+    return {
+        "items": [serialize_track(track) for track in tracks],
+        "count": len(tracks),
+    }
+
+
+@app.get("/tracks/search/by-title")
+def search_tracks_by_title(
+    title: str = Query(..., min_length=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    return search_tracks(query=title, limit=limit, db=db)
+
+
 @app.get("/tracks/{track_id}")
 def get_track(track_id: int, db: Session = Depends(get_db)):
     track = db.query(Track).filter(Track.id == track_id).first()
     if track is None:
         raise HTTPException(status_code=404, detail="Track not found")
     return serialize_track(track)
-
-
-@app.get("/tracks/search/by-title")
-def search_tracks(
-    title: str = Query(..., min_length=1),
-    limit: int = Query(default=20, ge=1, le=100),
-    db: Session = Depends(get_db),
-):
-    tracks = (
-        db.query(Track)
-        .filter(Track.title == title)
-        .order_by(Track.id.asc())
-        .limit(limit)
-        .all()
-    )
-
-    return {
-        "items": [serialize_track(track) for track in tracks],
-        "count": len(tracks),
-    }
 
 
 @app.get("/tracks/{track_id}/audio")
