@@ -1,6 +1,11 @@
 import { clearStoredToken, getStoredToken } from "../auth/tokenStore";
 import type {
+  AdminBulkUploadResponse,
+  AdminTrackUploadResponse,
   AuthResponse,
+  CatalogJobResponse,
+  CatalogJobStartedResponse,
+  CatalogSyncResponse,
   RecognitionHistoryItem,
   RecognitionResponse,
   Track,
@@ -194,5 +199,54 @@ export const api = {
 
   getTrackAudio(id: number | string) {
     return requestBlob(`/api/tracks/${id}/audio`);
+  },
+
+  adminUploadTrack(file: File, title: string, artist: string, album = "") {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("title", title);
+    formData.append("artist", artist);
+    if (album.trim()) {
+      formData.append("album", album.trim());
+    }
+
+    return request<AdminTrackUploadResponse>("/api/admin/tracks", {
+      method: "POST",
+      body: formData,
+    });
+  },
+
+  adminUploadBulk(file: File, manifest: File, bucket = "", prefix = "", maxFiles = "") {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("manifest", manifest);
+    if (bucket.trim()) {
+      formData.append("bucket", bucket.trim());
+    }
+    formData.append("prefix", prefix.trim());
+    if (maxFiles.trim()) {
+      formData.append("maxFiles", maxFiles.trim());
+    }
+
+    return request<AdminBulkUploadResponse>("/api/admin/tracks/bulk", {
+      method: "POST",
+      body: formData,
+    });
+  },
+
+  adminSyncCatalog() {
+    return request<CatalogSyncResponse>("/api/admin/catalog/sync", {
+      method: "POST",
+    });
+  },
+
+  adminFullRebuild() {
+    return request<CatalogJobStartedResponse>("/api/admin/catalog/full-rebuild", {
+      method: "POST",
+    });
+  },
+
+  adminGetJob(jobId: string) {
+    return request<CatalogJobResponse>(`/api/admin/jobs/${encodeURIComponent(jobId)}`);
   },
 };

@@ -14,6 +14,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -69,17 +70,31 @@ public class CatalogAdminService {
     }
 
     @Transactional
-    public AdminBulkUploadResponse startBulkImport(String username) {
-        CatalogUpdateJob job = createJob(username, CatalogUpdateJobType.BULK_IMPORT);
-        CompletableFuture.runAsync(() -> failBulkImport(job.getId()));
-        return new AdminBulkUploadResponse(job.getId(), "STARTED");
-    }
+    public AdminBulkUploadResponse uploadBulk(
+            String username,
+            MultipartFile file,
+            MultipartFile manifest,
+            String bucket,
+            String prefix,
+            Integer maxFiles
+    ) {
+        if (file == null || file.isEmpty()) {
+            throw new BadRequestException("Archive file is empty");
+        }
 
-    @Transactional
-    public void failBulkImport(UUID jobId) {
-        CatalogUpdateJob job = jobRepository.findById(jobId)
-                .orElseThrow(() -> new NotFoundException("Catalog update job not found"));
-        failJob(job, new BadRequestException("Bulk import is not implemented yet; use single-track upload"));
+        if (manifest == null || manifest.isEmpty()) {
+            throw new BadRequestException("Manifest file is empty");
+        }
+
+        Map<String, Object> summary = fingerprintClient.uploadArchive(
+                file,
+                manifest,
+                bucket,
+                prefix,
+                maxFiles
+        );
+
+        return new AdminBulkUploadResponse("COMPLETED", summary);
     }
 
     @Transactional

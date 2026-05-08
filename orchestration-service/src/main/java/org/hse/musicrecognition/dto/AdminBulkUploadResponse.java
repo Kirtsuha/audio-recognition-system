@@ -1,9 +1,9 @@
 package org.hse.musicrecognition.dto;
 
-import java.util.UUID;
+import java.util.Map;
 
 public record AdminBulkUploadResponse(
-        UUID jobId,
-        String status
+        String status,
+        Map<String, Object> summary
 ) {
 }
