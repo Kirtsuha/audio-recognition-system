@@ -1,0 +1,31 @@
+# Environment
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+htmlcov/
+coverage-*/
+
+# IDEs and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Evaluation artifacts
+eval/
+queries/
+*.wav
+*.jsonl
+metrics.json
