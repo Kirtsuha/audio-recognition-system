@@ -16,9 +16,6 @@ coverage.xml
 *.cover
 htmlcov/
 coverage-*/
-junit*.xml
-.mypy_cache/
-.ruff_cache/
 
 # IDEs and OS files
 .idea/
@@ -26,16 +23,9 @@ junit*.xml
 .DS_Store
 Thumbs.db
 
-# Service artifacts
-data/
-artifacts/
-runs/
-active/
+# Evaluation artifacts
+eval/
+queries/
 *.wav
-*.mp3
-*.flac
-*.npy
-*.npz
-*.pkl
-*.sqlite
-*.db
+*.jsonl
+metrics.json

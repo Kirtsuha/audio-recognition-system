@@ -1,0 +1,51 @@
+[run]
+data_file = .coverage.fingerprint-unit
+source =
+    fingerprint-service/app
+omit =
+    */audio/loader.py
+    */audio/spectrogram.py
+    */fingerprint/hashgen.py
+    */fingerprint/indexer.py
+    */fingerprint/peaks.py
+    */fingerprint_experiment/algorithm.py
+    */repository/database_config.py
+    */repository/db.py
+    */repository/init_db.py
+    */repository/s3_client.py
+    */service/audio2fingerprint.py
+    */service/postgres_loader_pipeline.py
+    */scripts/s3_loader.py
+    */fingerprint_experiment/runner.py
+    */fingerprint_experiment/audio_ops.py
+    */fingerprint_experiment/augment.py
+    */fingerprint_experiment/job_status.py
+    */fingerprint_experiment/schemas.py
+    */logging_utils.py
+    */main.py
+
+[report]
+omit =
+    */audio/loader.py
+    */audio/spectrogram.py
+    */fingerprint/hashgen.py
+    */fingerprint/indexer.py
+    */fingerprint/peaks.py
+    */fingerprint_experiment/algorithm.py
+    */repository/database_config.py
+    */repository/db.py
+    */repository/init_db.py
+    */repository/s3_client.py
+    */service/audio2fingerprint.py
+    */service/postgres_loader_pipeline.py
+    */scripts/s3_loader.py
+    */fingerprint_experiment/runner.py
+    */fingerprint_experiment/audio_ops.py
+    */fingerprint_experiment/augment.py
+    */fingerprint_experiment/job_status.py
+    */fingerprint_experiment/schemas.py
+    */logging_utils.py
+    */main.py
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:

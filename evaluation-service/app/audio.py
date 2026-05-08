@@ -191,18 +191,136 @@ def simple_reverb(audio: np.ndarray) -> np.ndarray:
     return np.convolve(audio, impulse, mode="full")[: len(audio)].astype(np.float32)
 
 
+def _bandpass_fft(audio: np.ndarray, low_hz: float, high_hz: float) -> np.ndarray:
+    n = len(audio)
+    if n <= 1:
+        return audio.astype(np.float32)
+
+    spectrum = np.fft.rfft(audio)
+    freqs = np.fft.rfftfreq(n, d=1.0 / SR)
+    mask = (freqs >= low_hz) & (freqs <= high_hz)
+    return np.fft.irfft(spectrum * mask, n=n).astype(np.float32)
+
+
+def add_colored_noise(audio: np.ndarray, snr_db_min: float, snr_db_max: float, color: str = "pink") -> np.ndarray:
+    snr_db = random.uniform(snr_db_min, snr_db_max)
+    n = len(audio)
+    if n <= 1:
+        return audio.astype(np.float32)
+
+    white = np.random.randn(n).astype(np.float32)
+    spectrum = np.fft.rfft(white)
+    freqs = np.fft.rfftfreq(n, d=1.0 / SR)
+    freqs[0] = freqs[1] if len(freqs) > 1 else 1.0
+
+    if color == "pink":
+        scale = 1.0 / np.sqrt(freqs)
+    elif color == "brown":
+        scale = 1.0 / freqs
+    else:
+        scale = np.ones_like(freqs)
+
+    colored = np.fft.irfft(spectrum * scale, n=n).astype(np.float32)
+    colored = colored / (np.std(colored) + 1e-8)
+
+    signal_power = np.mean(audio ** 2) + 1e-8
+    noise_power = signal_power / (10 ** (snr_db / 10.0))
+    return (audio + colored * np.sqrt(noise_power)).astype(np.float32)
+
+
+def random_dynamic_compression(audio: np.ndarray) -> np.ndarray:
+    threshold = random.uniform(0.12, 0.45)
+    ratio = random.uniform(2.0, 8.0)
+    x = audio.astype(np.float32)
+    sign = np.sign(x)
+    mag = np.abs(x)
+    over = mag > threshold
+    mag[over] = threshold + (mag[over] - threshold) / ratio
+    return (sign * mag).astype(np.float32)
+
+
+def random_phone_filter(audio: np.ndarray, hard: bool = False) -> np.ndarray:
+    low = random.uniform(90.0, 260.0) if hard else random.uniform(60.0, 180.0)
+    high = random.uniform(4200.0, 7200.0) if hard else random.uniform(5500.0, 7800.0)
+    return _bandpass_fft(audio.astype(np.float32), low_hz=low, high_hz=high)
+
+
+def random_codec_degrade(audio: np.ndarray, hard: bool = False) -> np.ndarray:
+    target_sr = random.choice([6000, 8000, 11025, 12000] if hard else [11025, 12000, 14000])
+    try:
+        down = librosa.resample(audio, orig_sr=SR, target_sr=target_sr)
+        up = librosa.resample(down, orig_sr=target_sr, target_sr=SR)
+        if len(up) < len(audio):
+            up = np.pad(up, (0, len(audio) - len(up)))
+        return up[: len(audio)].astype(np.float32)
+    except Exception:
+        return audio.astype(np.float32)
+
+
+def random_soft_saturation(audio: np.ndarray) -> np.ndarray:
+    drive = random.uniform(1.1, 2.5)
+    return (np.tanh(audio.astype(np.float32) * drive) / np.tanh(drive)).astype(np.float32)
+
+
+def augment_phone(audio: np.ndarray, level: str) -> np.ndarray:
+    out = audio.astype(np.float32).copy()
+    hard = level == "phone_hard"
+
+    if random.random() < (0.90 if hard else 0.70):
+        out = random_gain(out, min_db=-16.0 if hard else -10.0, max_db=9.0 if hard else 6.0)
+    if random.random() < (0.75 if hard else 0.55):
+        out = random_phone_filter(out, hard=hard)
+    if random.random() < (0.60 if hard else 0.35):
+        out = random_dynamic_compression(out)
+    if random.random() < (0.55 if hard else 0.35):
+        out = simple_reverb(out)
+    if random.random() < (0.75 if hard else 0.55):
+        out = add_colored_noise(
+            out,
+            snr_db_min=0.0 if hard else 8.0,
+            snr_db_max=16.0 if hard else 24.0,
+            color=random.choice(["pink", "brown", "white"] if hard else ["pink", "white"]),
+        )
+    if random.random() < (0.30 if hard else 0.15):
+        out = random_soft_saturation(out)
+    if random.random() < (0.20 if hard else 0.10):
+        out = random_codec_degrade(out, hard=hard)
+
+    return normalize_peak(out, peak=random.uniform(0.86, 0.98))
+
+
+def augment_phone_noisy(audio: np.ndarray) -> np.ndarray:
+    r = random.random()
+    if r < 0.65:
+        return augment_phone(audio, "phone_mild")
+    if r < 0.92:
+        return augment_phone(audio, "phone_medium")
+    return augment_phone(audio, "phone_hard")
+
+
 def apply_corruption(audio: np.ndarray, corruption: str) -> np.ndarray:
     out = audio.astype(np.float32).copy()
 
     if corruption == "clean":
         return normalize_peak(out)
 
-    if corruption == "noise_snr20":
+    if corruption in {"noisy", "noise_snr20"}:
         out = add_gaussian_noise(out, 18.0, 22.0)
     elif corruption == "noise_snr10":
         out = add_gaussian_noise(out, 9.0, 11.0)
     elif corruption == "noise_snr5":
         out = add_gaussian_noise(out, 4.0, 6.0)
+    elif corruption == "strong_noisy":
+        out = random_gain(out, min_db=-14.0, max_db=10.0)
+        out = add_gaussian_noise(out, snr_db_min=-2.0, snr_db_max=18.0)
+        if random.random() < 0.45:
+            out = random_clipping(out, min_clip=0.45, max_clip=0.90)
+        if random.random() < 0.45:
+            out = simple_reverb(out)
+    elif corruption in {"phone_mild", "phone_medium", "phone_hard"}:
+        out = augment_phone(out, corruption)
+    elif corruption == "phone_noisy":
+        out = augment_phone_noisy(out)
     elif corruption == "reverb":
         out = simple_reverb(out)
     elif corruption == "clipping":

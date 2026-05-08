@@ -14,6 +14,7 @@ from app.audio import (
 )
 from app.config import (
     DATASET_PROGRESS_EVERY,
+    DEFAULT_CORRUPTIONS,
     EVAL_AUDIO_SOURCE,
     EVAL_QUERIES_DIR,
     EVAL_QUERIES_PATH,
@@ -24,19 +25,6 @@ from app.logging_utils import log_stage
 from app.utils import read_jsonl, write_jsonl
 
 logger = logging.getLogger("evaluation.dataset")
-
-
-NOISY_BUCKETS = [
-    "noise_snr20",
-    "noise_snr10",
-    "noise_snr5",
-    "reverb",
-    "clipping",
-    "gain",
-    "pitch_shift",
-    "time_stretch",
-    "mixed_noise_reverb",
-]
 
 
 def _safe_filename(value: str) -> str:
@@ -87,8 +75,15 @@ def generate_eval_dataset(
     durations_sec: list[float],
     test_limit: int | None = None,
     negative_limit: int = 200,
+    corruptions: list[str] | None = None,
+    seed: int | None = 42,
 ) -> dict:
     started = time.perf_counter()
+    corruptions = corruptions or DEFAULT_CORRUPTIONS
+
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
 
     with log_stage(
         logger,
@@ -99,6 +94,8 @@ def generate_eval_dataset(
         clean_per_track=per_track_clean_queries,
         noisy_per_track=per_track_noisy_queries,
         durations=durations_sec,
+        corruptions=corruptions,
+        seed=seed,
     ):
         items = _load_test_items(test_limit)
 
@@ -151,8 +148,13 @@ def generate_eval_dataset(
                     )
                     positive_queries += 1
 
+                noisy_corruptions = [x for x in corruptions if x != "clean"]
+
                 for noisy_idx in range(per_track_noisy_queries):
-                    corruption = NOISY_BUCKETS[noisy_idx % len(NOISY_BUCKETS)]
+                    if not noisy_corruptions:
+                        break
+
+                    corruption = noisy_corruptions[noisy_idx % len(noisy_corruptions)]
 
                     segment = cut_random_segment(audio, duration_sec)
                     query_audio = apply_corruption(segment, corruption)
@@ -270,6 +272,8 @@ def generate_eval_dataset(
             "queries_path": str(EVAL_QUERIES_PATH),
             "queries_dir": str(EVAL_QUERIES_DIR),
             "audio_source": EVAL_AUDIO_SOURCE,
+            "corruptions": corruptions,
+            "seed": seed,
             "elapsed_sec": elapsed,
         }
 

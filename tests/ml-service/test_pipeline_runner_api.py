@@ -37,7 +37,7 @@ def test_pipeline_status(monkeypatch):
 
 def test_full_run_scheduled(monkeypatch):
     monkeypatch.setattr(runner, "pipeline_in_progress", False)
-    monkeypatch.setattr(runner, "run_full_pipeline", lambda bucket, prefix: None)
+    monkeypatch.setattr(runner, "run_full_pipeline", lambda payload: None)
 
     response = client.post(
         "/pipeline/full-run",
@@ -88,7 +88,7 @@ def test_experiment_run_scheduled(monkeypatch):
 
 def test_incremental_sync_scheduled(monkeypatch):
     monkeypatch.setattr(runner, "pipeline_in_progress", False)
-    monkeypatch.setattr(runner, "run_incremental_pipeline", lambda bucket, prefix: None)
+    monkeypatch.setattr(runner, "run_incremental_pipeline", lambda payload: None)
 
     response = client.post(
         "/pipeline/incremental-sync",

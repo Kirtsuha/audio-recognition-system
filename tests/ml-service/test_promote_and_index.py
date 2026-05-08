@@ -1,5 +1,3 @@
-from pathlib import Path
-import shutil
 import json
 
 import faiss
@@ -9,13 +7,6 @@ import pytest
 import pipeline.promote as promote
 from pipeline.build_index import append_to_faiss_index, build_faiss_index
 
-
-def ascii_tmp_dir(name: str) -> Path:
-    path = Path("C:/pytest_faiss_tmp") / name
-    if path.exists():
-        shutil.rmtree(path)
-    path.mkdir(parents=True, exist_ok=True)
-    return path
 
 def test_promote_run_to_active(tmp_path, monkeypatch):
     run_dir = tmp_path / "run"
@@ -56,8 +47,9 @@ def test_promote_missing_artifact_raises(tmp_path, monkeypatch):
         promote.promote_run_to_active(run_dir)
 
 
-def test_build_faiss_index():
-    work = ascii_tmp_dir("build_faiss_index")
+def test_build_faiss_index(tmp_path, monkeypatch):
+    work = tmp_path / "build_faiss_index"
+    work.mkdir()
 
     embeddings_path = work / "embeddings.npy"
     song_ids_path = work / "song_ids.npy"
@@ -69,11 +61,26 @@ def test_build_faiss_index():
     )
     np.save(song_ids_path, np.array([10, 20], dtype=np.int64))
 
-    build_faiss_index(embeddings_path, song_ids_path, index_path)
+    written = {}
 
-    index = faiss.read_index(str(index_path))
+    def fake_write_index(index, path):
+        written["index"] = index
+        written["path"] = path
+
+    monkeypatch.setattr(faiss, "write_index", fake_write_index)
+
+    summary = build_faiss_index(
+        embeddings_path,
+        song_ids_path,
+        index_path,
+        index_type="flat",
+    )
+
+    index = written["index"]
     assert index.ntotal == 2
     assert index.d == 2
+    assert written["path"] == str(index_path)
+    assert summary["vectors"] == 2
 
 
 def test_build_faiss_index_invalid_shape(tmp_path):
@@ -100,8 +107,9 @@ def test_build_faiss_index_length_mismatch(tmp_path):
         build_faiss_index(embeddings_path, song_ids_path, index_path)
 
 
-def test_append_to_faiss_index():
-    work = ascii_tmp_dir("append_faiss_index")
+def test_append_to_faiss_index(tmp_path, monkeypatch):
+    work = tmp_path / "append_faiss_index"
+    work.mkdir()
 
     base_index_path = work / "base.index"
     new_embeddings_path = work / "new_embeddings.npy"
@@ -112,11 +120,14 @@ def test_append_to_faiss_index():
 
     index = faiss.IndexFlatIP(2)
     index.add(base_vectors)
-    faiss.write_index(index, str(base_index_path))
-
     np.save(new_embeddings_path, np.array([[0.0, 1.0]], dtype=np.float32))
+
+    written = {}
+    monkeypatch.setattr(faiss, "read_index", lambda path: index)
+    monkeypatch.setattr(faiss, "write_index", lambda index, path: written.update(index=index, path=path))
 
     append_to_faiss_index(base_index_path, new_embeddings_path, output_index_path)
 
-    out = faiss.read_index(str(output_index_path))
-    assert out.ntotal == 2
+    assert index.ntotal == 2
+    assert written["index"] is index
+    assert written["path"] == str(output_index_path)

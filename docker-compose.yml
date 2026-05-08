@@ -195,11 +195,13 @@ services:
     depends_on:
       fingerprint-service:
         condition: service_started
-      ml-service:
+      orchestration-service:
         condition: service_started
     environment:
       FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
-      ML_SERVICE_URL: http://ml-service:8010
+      ORCHESTRATION_SERVICE_URL: http://orchestration-service:8080
+      EVALUATION_USERNAME: evaluation-user
+      EVALUATION_PASSWORD: evaluation-password
 
       PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
 
@@ -207,7 +209,7 @@ services:
       EVAL_QUERIES_DIR: /app/eval/queries
       EVAL_QUERIES_PATH: /app/eval/eval_queries.jsonl
       FINGERPRINT_RESULTS_PATH: /app/eval/fingerprint_results.jsonl
-      ML_RESULTS_PATH: /app/eval/ml_results.jsonl
+      RECOGNITION_RESULTS_PATH: /app/eval/recognition_results.jsonl
       COMBINED_RESULTS_PATH: /app/eval/combined_results.jsonl
       METRICS_PATH: /app/eval/metrics.json
 

@@ -9,8 +9,9 @@ from app.config import (
     EVAL_QUERIES_PATH,
     FINGERPRINT_RESULTS_PATH,
     METRICS_PATH,
-    ML_RESULTS_PATH,
+    ORCHESTRATION_SERVICE_URL,
     PREPARED_MANIFEST_PATH,
+    RECOGNITION_RESULTS_PATH,
     S3_BUCKET,
     S3_ENDPOINT,
     SR,
@@ -21,7 +22,7 @@ from app.metrics import build_all_metrics
 from app.runners import (
     run_combined_evaluation,
     run_fingerprint_evaluation,
-    run_ml_evaluation,
+    run_recognition_evaluation,
 )
 from app.schemas import EvalRunRequest, GenerateEvalDatasetRequest, RunAllRequest
 from app.utils import read_jsonl
@@ -60,8 +61,8 @@ def evaluation_status():
         "eval_queries_count": len(read_jsonl(EVAL_QUERIES_PATH)),
         "fingerprint_results_path": str(FINGERPRINT_RESULTS_PATH),
         "fingerprint_results_exists": FINGERPRINT_RESULTS_PATH.exists(),
-        "ml_results_path": str(ML_RESULTS_PATH),
-        "ml_results_exists": ML_RESULTS_PATH.exists(),
+        "recognition_results_path": str(RECOGNITION_RESULTS_PATH),
+        "recognition_results_exists": RECOGNITION_RESULTS_PATH.exists(),
         "combined_results_path": str(COMBINED_RESULTS_PATH),
         "combined_results_exists": COMBINED_RESULTS_PATH.exists(),
         "metrics_path": str(METRICS_PATH),
@@ -70,6 +71,7 @@ def evaluation_status():
         "sr": SR,
         "s3_endpoint": S3_ENDPOINT,
         "s3_bucket": S3_BUCKET,
+        "orchestration_url": ORCHESTRATION_SERVICE_URL,
     }
 
 
@@ -83,6 +85,8 @@ def generate_dataset_endpoint(payload: GenerateEvalDatasetRequest):
         durations_sec=payload.durations_sec,
         test_limit=payload.test_limit,
         negative_limit=payload.negative_limit,
+        corruptions=payload.corruptions,
+        seed=payload.seed,
     )
 
 
@@ -93,14 +97,15 @@ def run_fingerprint_endpoint(payload: EvalRunRequest):
     return run_fingerprint_evaluation(
         limit=payload.limit,
         timeout_sec=payload.timeout_sec,
+        top_k=payload.top_k,
     )
 
 
-@app.post("/evaluation/ml/run")
-def run_ml_endpoint(payload: EvalRunRequest):
-    logger.info("Request: run ML evaluation payload=%s", payload.model_dump())
+@app.post("/evaluation/recognition/run")
+def run_recognition_endpoint(payload: EvalRunRequest):
+    logger.info("Request: run recognition evaluation payload=%s", payload.model_dump())
 
-    return run_ml_evaluation(
+    return run_recognition_evaluation(
         limit=payload.limit,
         timeout_sec=payload.timeout_sec,
     )
@@ -113,6 +118,7 @@ def run_combined_endpoint(payload: EvalRunRequest):
     return run_combined_evaluation(
         limit=payload.limit,
         timeout_sec=payload.timeout_sec,
+        top_k=payload.top_k,
     )
 
 
@@ -136,14 +142,17 @@ def run_all_endpoint(payload: RunAllRequest):
                 durations_sec=payload.durations_sec,
                 test_limit=payload.test_limit,
                 negative_limit=payload.negative_limit,
+                corruptions=payload.corruptions,
+                seed=payload.seed,
             )
 
         result["fingerprint"] = run_fingerprint_evaluation(
             limit=payload.eval_limit,
             timeout_sec=payload.timeout_sec,
+            top_k=payload.top_k,
         )
 
-        result["ml"] = run_ml_evaluation(
+        result["recognition"] = run_recognition_evaluation(
             limit=payload.eval_limit,
             timeout_sec=payload.timeout_sec,
         )
@@ -151,6 +160,7 @@ def run_all_endpoint(payload: RunAllRequest):
         result["combined"] = run_combined_evaluation(
             limit=payload.eval_limit,
             timeout_sec=payload.timeout_sec,
+            top_k=payload.top_k,
         )
 
         result["metrics"] = build_all_metrics()
