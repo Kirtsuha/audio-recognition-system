@@ -1,7 +1,10 @@
+import { useEffect, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { api } from "../api/client";
+import type { UserProfile } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 
-const navItems = [
+const baseNavItems = [
   { to: "/recognition", label: "Recognition" },
   { to: "/search", label: "Search" },
   { to: "/history", label: "History" },
@@ -10,6 +13,31 @@ const navItems = [
 
 export function AppLayout() {
   const { logout } = useAuth();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+
+    api.getProfile()
+      .then((nextProfile) => {
+        if (!ignore) {
+          setProfile(nextProfile);
+        }
+      })
+      .catch(() => {
+        if (!ignore) {
+          setProfile(null);
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const navItems = profile?.role === "ROLE_ADMIN"
+    ? [...baseNavItems, { to: "/admin", label: "Admin" }]
+    : baseNavItems;
 
   return (
     <div className="app-shell">

@@ -2,7 +2,6 @@ package org.hse.musicrecognition.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.hse.musicrecognition.dto.*;
-import org.hse.musicrecognition.exception.BadRequestException;
 import org.hse.musicrecognition.service.CatalogAdminService;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -40,13 +39,20 @@ public class AdminCatalogController {
     @PostMapping(value = "/tracks/bulk", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public AdminBulkUploadResponse uploadBulk(
             @RequestPart("file") MultipartFile file,
+            @RequestPart("manifest") MultipartFile manifest,
+            @RequestParam(value = "bucket", required = false) String bucket,
+            @RequestParam(value = "prefix", required = false, defaultValue = "") String prefix,
+            @RequestParam(value = "maxFiles", required = false) Integer maxFiles,
             Principal principal
     ) {
-        if (file == null || file.isEmpty()) {
-            throw new BadRequestException("Archive file is empty");
-        }
-
-        return catalogAdminService.startBulkImport(principal.getName());
+        return catalogAdminService.uploadBulk(
+                principal.getName(),
+                file,
+                manifest,
+                bucket,
+                prefix,
+                maxFiles
+        );
     }
 
     @PostMapping("/catalog/sync")

@@ -7,6 +7,7 @@ import org.hse.musicrecognition.dto.TrackMetadataResponse;
 import org.hse.musicrecognition.dto.TrackSearchResponse;
 import org.hse.musicrecognition.exception.ExternalServiceUnavailableException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
@@ -16,6 +17,8 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.multipart.MultipartFile;
+
+import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
@@ -123,6 +126,56 @@ public class FingerprintClient {
                     .body(body)
                     .retrieve()
                     .body(FingerprintTrackUploadResponse.class);
+        } catch (Exception e) {
+            throw new ExternalServiceUnavailableException("Fingerprint service is unavailable", e);
+        }
+    }
+
+    public Map<String, Object> uploadArchive(
+            MultipartFile file,
+            MultipartFile manifest,
+            String bucket,
+            String prefix,
+            Integer maxFiles
+    ) {
+        try {
+            ByteArrayResource archiveResource = new ByteArrayResource(file.getBytes()) {
+                @Override
+                public String getFilename() {
+                    return file.getOriginalFilename() == null || file.getOriginalFilename().isBlank()
+                            ? "tracks.zip"
+                            : file.getOriginalFilename();
+                }
+            };
+
+            ByteArrayResource manifestResource = new ByteArrayResource(manifest.getBytes()) {
+                @Override
+                public String getFilename() {
+                    return manifest.getOriginalFilename() == null || manifest.getOriginalFilename().isBlank()
+                            ? "manifest.csv"
+                            : manifest.getOriginalFilename();
+                }
+            };
+
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            body.add("file", archiveResource);
+            body.add("manifest", manifestResource);
+            if (bucket != null && !bucket.isBlank()) {
+                body.add("bucket", bucket);
+            }
+            if (prefix != null) {
+                body.add("prefix", prefix);
+            }
+            if (maxFiles != null) {
+                body.add("max_files", maxFiles);
+            }
+
+            return restClient.post()
+                    .uri(fingerprintUrl + "/s3/upload-archive")
+                    .contentType(MediaType.MULTIPART_FORM_DATA)
+                    .body(body)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
             throw new ExternalServiceUnavailableException("Fingerprint service is unavailable", e);
         }

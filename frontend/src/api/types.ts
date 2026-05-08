@@ -42,3 +42,43 @@ export type TrackSearchResponse = {
   items: Track[];
   count: number;
 };
+
+export type AdminTrackUploadResponse = {
+  trackId: number;
+  title: string | null;
+  artist: string | null;
+  album: string | null;
+  status: string;
+};
+
+export type AdminBulkUploadResponse = {
+  status: string;
+  summary: Record<string, unknown>;
+};
+
+export type CatalogJobStep = {
+  name: string;
+  status: string;
+  errorMessage: string | null;
+};
+
+export type CatalogJobResponse = {
+  jobId: string;
+  type: string;
+  status: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  errorMessage: string | null;
+  steps: CatalogJobStep[];
+};
+
+export type CatalogJobStartedResponse = {
+  jobId: string;
+  status: string;
+};
+
+export type CatalogSyncResponse = {
+  jobId: string;
+  status: string;
+  steps: CatalogJobStep[];
+};

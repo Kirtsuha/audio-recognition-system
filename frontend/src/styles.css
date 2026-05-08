@@ -120,6 +120,12 @@ input:focus {
   border-color: #127580;
 }
 
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .primary-button,
 .ghost-button,
 .danger-button {
@@ -561,6 +567,57 @@ input:focus {
   gap: 10px;
 }
 
+.admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+.admin-form {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-form label,
+.job-query label {
+  display: grid;
+  gap: 8px;
+  color: #36424f;
+  font-weight: 800;
+}
+
+.compact-file-drop {
+  min-height: 128px;
+}
+
+.job-query {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.admin-result {
+  display: grid;
+  gap: 14px;
+}
+
+.result-json {
+  display: grid;
+  gap: 12px;
+}
+
+.result-json pre {
+  max-height: 460px;
+  overflow: auto;
+  border: 1px solid #e3e8ed;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f8fafb;
+  color: #26323e;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -618,6 +675,11 @@ input:focus {
   }
 
   .search-form {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-grid,
+  .job-query {
     grid-template-columns: 1fr;
   }
 }
