@@ -1,0 +1,41 @@
+# Environment
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest_tmp/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+htmlcov/
+coverage-*/
+junit*.xml
+.mypy_cache/
+.ruff_cache/
+
+# IDEs and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Service artifacts
+data/
+artifacts/
+runs/
+active/
+*.wav
+*.mp3
+*.flac
+*.npy
+*.npz
+*.pkl
+*.sqlite
+*.db

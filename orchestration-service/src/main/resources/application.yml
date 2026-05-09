@@ -1,0 +1,54 @@
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+
+  servlet:
+    multipart:
+      max-file-size: ${SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE:250MB}
+      max-request-size: ${SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE:260MB}
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+
+fingerprint:
+  service:
+    url: ${FINGERPRINT_SERVICE_URL:http://fingerprint-service:8000}
+
+ml-reranker:
+  service:
+    url: ${ML_RERANKER_SERVICE_URL:http://ml-reranker-service:8010}
+
+ml:
+  service:
+    url: ${ML_SERVICE_URL:http://ml-pipeline-runner:8011}
+
+catalog:
+  s3:
+    bucket: ${CATALOG_S3_BUCKET:tracks}
+    prefix: ${CATALOG_S3_PREFIX:}
+  active-artifacts-dir: ${CATALOG_ACTIVE_ARTIFACTS_DIR:/app/artifacts/active}
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://minio:9000}
+  access-key: ${MINIO_ACCESS_KEY:minio}
+  secret-key: ${MINIO_SECRET_KEY:minio123}
+
+recognition:
+  fingerprint:
+    top-k: ${RECOGNITION_FINGERPRINT_TOP_K:20}
+  storage:
+    query-audio-bucket: ${RECOGNITION_QUERY_AUDIO_BUCKET:recognition-queries}
+    query-audio-prefix: ${RECOGNITION_QUERY_AUDIO_PREFIX:debug}
+    reference-audio-bucket: ${RECOGNITION_REFERENCE_AUDIO_BUCKET:full-tracks}
+
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION:86400000}
+
+server:
+  tomcat:
+    max-swallow-size: ${SERVER_TOMCAT_MAX_SWALLOW_SIZE:-1}

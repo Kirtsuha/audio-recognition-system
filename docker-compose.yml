@@ -1,0 +1,346 @@
+services:
+  fingerprint-db:
+    image: postgres:15
+    container_name: fingerprint-db
+    environment:
+      POSTGRES_USER: fingerprint_user
+      POSTGRES_PASSWORD: fingerprint_pass
+      POSTGRES_DB: fingerprint_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - fingerprint_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fingerprint_user -d fingerprint_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  orchestration-db:
+    image: postgres:15
+    container_name: orchestration-db
+    environment:
+      POSTGRES_USER: orch_user
+      POSTGRES_PASSWORD: orch_pass
+      POSTGRES_DB: orchestration_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - orchestration_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orch_user -d orchestration_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minio minio123; do sleep 2; done &&
+      mc mb --ignore-existing local/tracks &&
+      mc mb --ignore-existing local/full-tracks &&
+      mc mb --ignore-existing local/recognition-queries
+      "
+
+  fingerprint-service:
+    build:
+      context: ./fingerprint-service
+    depends_on:
+      fingerprint-db:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: full-tracks
+      S3_PREFIX: ""
+      HF_TOKEN: ${HF_TOKEN}
+      FP_INDEX_WORKERS: 4
+      FP_FAST_REINDEX_MODE: "false"
+      FP_INSERT_BATCH_SIZE: 10000
+      FP_INDEX_PROGRESS_EVERY: 25
+    ports:
+      - "8000:8000"
+
+  ml-service:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile
+    depends_on:
+      fingerprint-service:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: full-tracks
+      S3_PREFIX: ""
+      TRACKS_DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
+      ARTIFACTS_DIR: /app/artifacts
+      ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
+      RUNS_DIR: /app/artifacts/runs
+      JOB_STATUS_PATH: /app/artifacts/job_status.json
+      MODEL_PATH: /app/artifacts/active/model.pt
+      EMBEDDINGS_PATH: /app/artifacts/active/embeddings.npy
+      SONG_IDS_PATH: /app/artifacts/active/song_ids.npy
+      FAISS_INDEX_PATH: /app/artifacts/active/faiss.index
+      SONG_MANIFEST_PATH: /app/artifacts/active/song_manifest.json
+      PREPARED_DATA_DIR: /app/prepared-data
+      PREPARED_DATASET_DIR: /app/prepared-data/dataset_v1
+      PREPARED_TRACKS_DIR: /app/prepared-data/dataset_v1/tracks
+      PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
+      INVALID_KEYS_PATH: /app/prepared-data/dataset_v1/invalid_keys.json
+      METRICS_PATH: /app/artifacts/active/metrics.json
+      NUM_WORKERS: 4
+      EVAL_DIR: /app/artifacts/eval
+      EVAL_QUERIES_PATH: /app/artifacts/eval/eval_queries.jsonl
+      EVAL_RESULTS_PATH: /app/artifacts/eval/eval_results.jsonl
+      EVAL_METRICS_PATH: /app/artifacts/eval/eval_metrics.json
+      THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
+      FAST_AUGMENT: "true"
+      TORCHAUDIO_MEL_DEVICE: "cpu"
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      COMBINED_RESULTS_PATH: /app/artifacts/eval/combined_eval_results.jsonl
+      COMBINED_METRICS_PATH: /app/artifacts/eval/combined_eval_metrics.json
+    ports:
+      - "8010:8010"
+    volumes:
+      - ml_artifacts:/app/artifacts
+      - ml_prepared_data:/app/prepared-data
+    shm_size: "1gb"
+
+  ml-pipeline-runner:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+
+    build:
+      context: ./ml-service
+      dockerfile: Dockerfile.pipeline
+    depends_on:
+      fingerprint-db:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: full-tracks
+      S3_PREFIX: ""
+      TRACKS_DATABASE_URL: postgresql://fingerprint_user:fingerprint_pass@fingerprint-db:5432/fingerprint_db
+      ARTIFACTS_DIR: /app/artifacts
+      ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
+      RUNS_DIR: /app/artifacts/runs
+      JOB_STATUS_PATH: /app/artifacts/job_status.json
+      PREPARED_DATA_DIR: /app/prepared-data
+      PREPARED_DATASET_DIR: /app/prepared-data/dataset_v1
+      PREPARED_TRACKS_DIR: /app/prepared-data/dataset_v1/tracks
+      PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
+      INVALID_KEYS_PATH: /app/prepared-data/dataset_v1/invalid_keys.json
+      METRICS_PATH: /app/artifacts/active/metrics.json
+      NUM_WORKERS: 4
+      EVAL_DIR: /app/artifacts/eval
+      EVAL_QUERIES_PATH: /app/artifacts/eval/eval_queries.jsonl
+      EVAL_RESULTS_PATH: /app/artifacts/eval/eval_results.jsonl
+      EVAL_METRICS_PATH: /app/artifacts/eval/eval_metrics.json
+      THRESHOLD_TUNING_PATH: /app/artifacts/eval/threshold_tuning.json
+      TORCHAUDIO_MEL_DEVICE: "cpu"
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      ML_RERANKER_SERVICE_URL: http://ml-reranker-service:8010
+      RERANK_EVAL_QUERY_BUCKET: recognition-queries
+      RERANK_EVAL_REFERENCE_BUCKET: full-tracks
+    ports:
+      - "8011:8011"
+    volumes:
+      - ml_artifacts:/app/artifacts
+      - ml_prepared_data:/app/prepared-data
+    shm_size: "1gb"
+
+  evaluation-service:
+    build:
+      context: ./evaluation-service
+    depends_on:
+      fingerprint-service:
+        condition: service_started
+      orchestration-service:
+        condition: service_started
+    environment:
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      ORCHESTRATION_SERVICE_URL: http://orchestration-service:8080
+      EVALUATION_USERNAME: evaluation-user
+      EVALUATION_PASSWORD: evaluation-password
+
+      PREPARED_MANIFEST_PATH: /app/prepared-data/dataset_v1/manifest.jsonl
+
+      EVAL_DIR: /app/eval
+      EVAL_QUERIES_DIR: /app/eval/queries
+      EVAL_QUERIES_PATH: /app/eval/eval_queries.jsonl
+      FINGERPRINT_RESULTS_PATH: /app/eval/fingerprint_results.jsonl
+      RECOGNITION_RESULTS_PATH: /app/eval/recognition_results.jsonl
+      COMBINED_RESULTS_PATH: /app/eval/combined_results.jsonl
+      METRICS_PATH: /app/eval/metrics.json
+
+      EVAL_AUDIO_SOURCE: s3
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minio
+      S3_SECRET_KEY: minio123
+      S3_BUCKET: full-tracks
+
+      LOG_LEVEL: INFO
+      DATASET_PROGRESS_EVERY: 25
+      RUNNER_PROGRESS_EVERY: 25
+      S3_PREFIX_CANDIDATES: ",fma/"
+
+      EVAL_SR: 16000
+    ports:
+      - "8020:8020"
+    volumes:
+      - ml_prepared_data:/app/prepared-data
+      - eval_artifacts:/app/eval
+
+  ml-reranker-service:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    build:
+      context: ./ml-reranker-service
+      dockerfile: Dockerfile
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      ML_RERANKER_S3_ENDPOINT: http://minio:9000
+      ML_RERANKER_S3_ACCESS_KEY: minio
+      ML_RERANKER_S3_SECRET_KEY: minio123
+
+      ML_RERANKER_QUERY_AUDIO_BUCKET: recognition-queries
+      ML_RERANKER_REFERENCE_AUDIO_BUCKET: full-tracks
+
+      ML_RERANKER_MODEL_PATH: /app/models/active/model.pt
+      ML_RERANKER_EMB_DIM: 128
+
+      ML_RERANKER_SR: 16000
+      ML_RERANKER_SEGMENT_SECONDS: 15.0
+
+      ML_RERANKER_N_MELS: 96
+      ML_RERANKER_N_FFT: 1024
+      ML_RERANKER_HOP_LENGTH: 256
+      ML_RERANKER_WIN_LENGTH: 1024
+      ML_RERANKER_FMIN: 20
+
+      ML_RERANKER_MAX_CANDIDATES: 20
+      ML_RERANKER_FINGERPRINT_OFFSET_HOP_SECONDS: 1.0
+      ML_RERANKER_OFFSET_JITTER_SECONDS: "-0.75,0.0,0.75"
+
+      ML_RERANKER_FP_WEIGHT: 0.95
+      ML_RERANKER_ML_WEIGHT: 0.05
+      ML_RERANKER_NO_MATCH_THRESHOLD: 0.45
+      ML_RERANKER_REF_EMBEDDINGS_PATH: /app/models/active/reranker_ref_embeddings.npy
+      ML_RERANKER_REF_META_PATH: /app/models/active/reranker_ref_meta.jsonl
+      ML_RERANKER_REF_CONFIG_PATH: /app/models/active/reranker_ref_config.json
+      ML_RERANKER_USE_PRECOMPUTED_REFERENCE_EMBEDDINGS: "true"
+      ML_RERANKER_REF_NEIGHBOR_WINDOWS: 1
+      ML_RERANKER_REF_FALLBACK_TO_AUDIO: "true"
+    ports:
+      - "8030:8010"
+    volumes:
+      - ml_artifacts:/app/models:ro
+    shm_size: "1gb"
+
+  orchestration-service:
+    build:
+      context: ./orchestration-service
+    depends_on:
+      fingerprint-service:
+        condition: service_started
+      ml-reranker-service:
+        condition: service_started
+      ml-pipeline-runner:
+        condition: service_started
+      orchestration-db:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://orchestration-db:5432/orchestration_db
+      SPRING_DATASOURCE_USERNAME: orch_user
+      SPRING_DATASOURCE_PASSWORD: orch_pass
+
+      FINGERPRINT_SERVICE_URL: http://fingerprint-service:8000
+      ML_SERVICE_URL: http://ml-pipeline-runner:8011
+      ML_RERANKER_SERVICE_URL: http://ml-reranker-service:8010
+      CATALOG_S3_BUCKET: full-tracks
+      CATALOG_S3_PREFIX: ""
+      CATALOG_ACTIVE_ARTIFACTS_DIR: /app/artifacts/active
+
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: minio
+      MINIO_SECRET_KEY: minio123
+
+      RECOGNITION_QUERY_AUDIO_BUCKET: recognition-queries
+      RECOGNITION_QUERY_AUDIO_PREFIX: debug
+      RECOGNITION_REFERENCE_AUDIO_BUCKET: full-tracks
+      RECOGNITION_FINGERPRINT_TOP_K: 20
+
+      JWT_SECRET: supersecretkeysupersecretkeysupersecretkey123456
+      JWT_EXPIRATION: 86400000
+
+      SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE: 250MB
+      SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE: 260MB
+      SERVER_TOMCAT_MAX_SWALLOW_SIZE: -1
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      orchestration-service:
+        condition: service_started
+    ports:
+      - "3000:80"
+
+volumes:
+  fingerprint_postgres_data:
+  orchestration_postgres_data:
+  minio_data:
+  ml_artifacts:
+  ml_prepared_data:
+  eval_artifacts:
