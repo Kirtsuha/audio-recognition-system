@@ -1,0 +1,10 @@
+.gradle/
+build/
+.idea/
+.vscode/
+out/
+*.iml
+*.log
+.env
+.env.*
+Dockerfile

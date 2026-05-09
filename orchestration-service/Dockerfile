@@ -1,8 +1,24 @@
-FROM eclipse-temurin:21-jdk
+# syntax=docker/dockerfile:1.7
+
+FROM eclipse-temurin:21-jdk AS builder
+
+WORKDIR /workspace
+
+COPY gradlew gradlew
+COPY gradle gradle
+COPY build.gradle.kts settings.gradle.kts gradle.properties ./
+
+RUN sed -i 's/\r$//' ./gradlew && chmod +x ./gradlew
+
+COPY src src
+
+RUN --mount=type=cache,target=/root/.gradle ./gradlew --no-daemon bootJar -x test
+
+FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
-COPY build/libs/*.jar app.jar
+COPY --from=builder /workspace/build/libs/*.jar app.jar
 
 ENV SPRING_DATASOURCE_URL=jdbc:postgresql://orchestration-db:5432/orchestration_db
 ENV SPRING_DATASOURCE_USERNAME=orch_user
